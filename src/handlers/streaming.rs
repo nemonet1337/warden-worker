@@ -298,6 +298,12 @@ async fn handle_send_download(
         .await?
         .ok_or_else(|| AppError::NotFound("Not found".into()))?;
 
+    // Re-validate the send before streaming bytes. The download token has its own TTL,
+    // but the send may have been disabled, hit its deletion/expiration date, or exceeded
+    // max_access_count between when the URL was minted and when it is fetched.
+    send.validate_access()
+        .map_err(|_| AppError::NotFound("Not found".into()))?;
+
     let storage_key = format!("sends/{send_id}/{file_id}");
     let fallback_size: Option<i64> = serde_json::from_str::<serde_json::Value>(&send.data)
         .ok()

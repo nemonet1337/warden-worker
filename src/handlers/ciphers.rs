@@ -46,6 +46,31 @@ async fn fetch_cipher_for_user(
         .ok_or_else(|| AppError::NotFound("Cipher not found".to_string()))
 }
 
+/// Validate that the given folder belongs to the user. No-op when folder_id is None.
+async fn ensure_folder_for_user(
+    db: &crate::db::Db,
+    folder_id: Option<&str>,
+    user_id: &str,
+) -> Result<(), AppError> {
+    let Some(folder_id) = folder_id else {
+        return Ok(());
+    };
+
+    let exists: Option<serde_json::Value> = db
+        .prepare("SELECT id FROM folders WHERE id = ?1 AND user_id = ?2")
+        .bind(&[folder_id.to_string().into(), user_id.to_string().into()])?
+        .first(None)
+        .await?;
+
+    if exists.is_none() {
+        return Err(AppError::BadRequest(
+            "Invalid folder: Folder does not exist or belongs to another user".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 #[worker::send]
 pub async fn create_cipher(
     claims: Claims,
@@ -55,6 +80,8 @@ pub async fn create_cipher(
     let db = db::get_db(&env)?;
     let now = db::now_string();
     let cipher_data_req = payload.cipher;
+
+    ensure_folder_for_user(&db, cipher_data_req.folder_id.as_deref(), &claims.sub).await?;
 
     let cipher_data = CipherData::new(
         cipher_data_req.name,
@@ -794,6 +821,9 @@ pub async fn create_cipher_simple(
 ) -> Result<Json<Cipher>, AppError> {
     let db = db::get_db(&env)?;
     let now = db::now_string();
+
+    ensure_folder_for_user(&db, payload.folder_id.as_deref(), &claims.sub).await?;
+
     let cipher_data = CipherData::new(payload.name, payload.notes, payload.type_fields);
 
     let data_value = serde_json::to_value(&cipher_data).map_err(|_| AppError::Internal)?;
