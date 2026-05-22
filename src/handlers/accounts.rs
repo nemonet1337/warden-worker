@@ -590,6 +590,18 @@ pub async fn delete_account(
     // Delete all user's sends and associated storage objects
     sends::delete_user_sends(&db, env.as_ref(), user_id).await?;
 
+    // D1 does not enforce SQLite foreign keys by default, so cascading deletes
+    // declared in the schema are not guaranteed to fire. Clean up dependent rows
+    // explicitly to avoid leaking orphan auth state, push tokens, and pending uploads.
+    d1_query!(
+        &db,
+        "DELETE FROM attachments_pending WHERE cipher_id IN (SELECT id FROM ciphers WHERE user_id = ?1)",
+        user_id
+    )
+    .map_err(|_| AppError::Database)?
+    .run()
+    .await?;
+
     // Delete all user's ciphers
     d1_query!(&db, "DELETE FROM ciphers WHERE user_id = ?1", user_id)
         .map_err(|_| AppError::Database)?
@@ -601,6 +613,18 @@ pub async fn delete_account(
         .map_err(|_| AppError::Database)?
         .run()
         .await?;
+
+    d1_query!(&db, "DELETE FROM twofactor WHERE user_uuid = ?1", user_id)
+        .map_err(|_| AppError::Database)?
+        .run()
+        .await?;
+
+    d1_query!(&db, "DELETE FROM auth_requests WHERE user_id = ?1", user_id)
+        .map_err(|_| AppError::Database)?
+        .run()
+        .await?;
+
+    Device::delete_all_by_user(&db, user_id).await?;
 
     // Delete the user
     d1_query!(&db, "DELETE FROM users WHERE id = ?1", user_id)
@@ -670,6 +694,11 @@ pub async fn post_password(
     .map_err(|_| AppError::Database)?
     .run()
     .await?;
+
+    // Drop all device rows: revokes refresh tokens AND `twofactor_remember` cookies
+    // so a stolen remember-2FA token can't be used to bypass 2FA after a password change.
+    push::unregister_push_devices_by_user(&env, user_id).await;
+    Device::delete_all_by_user(&db, user_id).await?;
 
     notifications::publish_user_logout((*env).clone(), claims.sub, now, Some(claims.device));
 
@@ -950,6 +979,9 @@ pub async fn post_rotatekey(
     .run()
     .await?;
 
+    push::unregister_push_devices_by_user(&env, user_id).await;
+    Device::delete_all_by_user(&db, user_id).await?;
+
     notifications::publish_user_logout((*env).clone(), claims.sub, now, Some(claims.device));
 
     Ok(Json(json!({})))
@@ -1045,6 +1077,9 @@ pub async fn post_kdf(
     .map_err(|_| AppError::Database)?
     .run()
     .await?;
+
+    push::unregister_push_devices_by_user(&env, user_id).await;
+    Device::delete_all_by_user(&db, user_id).await?;
 
     notifications::publish_user_logout((*env).clone(), claims.sub, now, Some(claims.device));
 

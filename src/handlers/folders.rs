@@ -123,6 +123,20 @@ pub async fn delete_folder(
     let db = db::get_db(&env)?;
     let now = db::now_string();
 
+    // D1 does not enforce SQLite foreign keys by default, so the schema's
+    // `ON DELETE SET NULL` does not fire. Clear the back-reference explicitly
+    // to avoid leaving ciphers pointing at a folder that no longer exists.
+    d1_query!(
+        &db,
+        "UPDATE ciphers SET folder_id = NULL, updated_at = ?1 WHERE folder_id = ?2 AND user_id = ?3",
+        now,
+        id,
+        claims.sub
+    )
+    .map_err(|_| AppError::Database)?
+    .run()
+    .await?;
+
     d1_query!(
         &db,
         "DELETE FROM folders WHERE id = ?1 AND user_id = ?2",

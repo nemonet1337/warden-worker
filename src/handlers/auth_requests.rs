@@ -151,6 +151,12 @@ pub async fn put_auth_request(
         return Err(bad_request());
     }
 
+    if auth_request.is_expired() {
+        // Don't let an attacker who keeps a stale, unapproved request alive approve it
+        // long after the original requester's window has closed.
+        return Err(bad_request());
+    }
+
     if auth_request.approved.is_some() {
         return Err(AppError::BadRequest(
             "An authentication request with the same device already exists".to_string(),
@@ -200,10 +206,13 @@ pub async fn get_auth_request_response(
         .await?
         .ok_or_else(bad_request)?;
 
-    if auth_request.device_type != request_device_type_from_headers(&headers)
+    if auth_request.is_expired()
+        || auth_request.device_type != request_device_type_from_headers(&headers)
         || auth_request.request_ip != request_ip_from_headers(&headers)
         || !auth_request.check_access_code(&query.code)
     {
+        // Expired requests must not leak the wrapped user key or master password hash,
+        // even if the caller still holds a valid access code.
         return Err(bad_request());
     }
 
