@@ -19,6 +19,8 @@ on:
 
 env:
     BACKUP_RETENTION_DAYS: ${{ secrets.BACKUP_RETENTION_DAYS || 30 }}
+    D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || 'vault1' }}
+    D1_DATABASE_NAME_DEV: ${{ vars.D1_DATABASE_NAME_DEV || 'vault1-dev' }}
 
 jobs:
     backup-production:
@@ -63,27 +65,13 @@ jobs:
             - name: Install wrangler
               run: npm install -g wrangler
 
-            - name: Get D1 Database Name
-              id: db_name
-              env:
-                  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-                  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-              run: |
-                  DB_NAME=$(npx wrangler d1 list --json | jq -r '.[] | select(.uuid == "${{ secrets.D1_DATABASE_ID }}") | .name')
-                  if [ -z "$DB_NAME" ]; then
-                    echo "❌ Error: Could not find database with D1_DATABASE_ID secret"
-                    exit 1
-                  fi
-                  echo "Found database name"
-                  echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
-
             - name: Export D1 Database
               env:
                   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
                   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
               run: |
-                  echo "Exporting D1 database..."
-                  npx wrangler d1 export "${{ steps.db_name.outputs.db_name }}" \
+                  echo "Exporting D1 database: ${D1_DATABASE_NAME}"
+                  npx wrangler d1 export "${D1_DATABASE_NAME}" \
                     --remote \
                     --output=backup.sql
                   
@@ -101,15 +89,15 @@ jobs:
                     echo "Encrypting backup with AES-256..."
                     openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
                       -in backup.sql.gz \
-                      -out "vault1_prod_${{ steps.date.outputs.date }}.sql.gz.enc" \
+                      -out "${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz.enc" \
                       -pass pass:"$BACKUP_ENCRYPTION_KEY"
                     rm backup.sql.gz
-                    echo "✅ Backup encrypted: vault1_prod_${{ steps.date.outputs.date }}.sql.gz.enc"
+                    echo "✅ Backup encrypted: ${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz.enc"
                     ls -lh *.enc
                   else
                     echo "⚠️ BACKUP_ENCRYPTION_KEY not set, skipping encryption"
-                    mv backup.sql.gz "vault1_prod_${{ steps.date.outputs.date }}.sql.gz"
-                    echo "Backup file: vault1_prod_${{ steps.date.outputs.date }}.sql.gz"
+                    mv backup.sql.gz "${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz"
+                    echo "Backup file: ${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz"
                     ls -lh *.sql.gz
                   fi
 
@@ -129,9 +117,9 @@ jobs:
 
                   # Choose file extension based on encryption status
                   if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
-                    BACKUP_FILE="vault1_prod_${{ steps.date.outputs.date }}.sql.gz.enc"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz.enc"
                   else
-                    BACKUP_FILE="vault1_prod_${{ steps.date.outputs.date }}.sql.gz"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz"
                   fi
                   
                   aws s3 cp "$BACKUP_FILE" \
@@ -198,9 +186,9 @@ jobs:
                   WEBDAV_BASE_PATH: ${{ secrets.WEBDAV_BASE_PATH || 'warden-worker' }}
               run: |
                   if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
-                    BACKUP_FILE="vault1_prod_${{ steps.date.outputs.date }}.sql.gz.enc"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz.enc"
                   else
-                    BACKUP_FILE="vault1_prod_${{ steps.date.outputs.date }}.sql.gz"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME }}_prod_${{ steps.date.outputs.date }}.sql.gz"
                   fi
                   
                   rclone mkdir "webdav:${WEBDAV_BASE_PATH}" || true
@@ -257,27 +245,13 @@ jobs:
             - name: Install wrangler
               run: npm install -g wrangler
 
-            - name: Get D1 Database Name (Dev)
-              id: db_name
-              env:
-                  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-                  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-              run: |
-                  DB_NAME=$(npx wrangler d1 list --json | jq -r '.[] | select(.uuid == "${{ secrets.D1_DATABASE_ID_DEV }}") | .name')
-                  if [ -z "$DB_NAME" ]; then
-                    echo "❌ Error: Could not find database with D1_DATABASE_ID_DEV secret"
-                    exit 1
-                  fi
-                  echo "Found database name"
-                  echo "db_name=$DB_NAME" >> $GITHUB_OUTPUT
-
             - name: Export D1 Database (Dev)
               env:
                   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
                   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
               run: |
-                  echo "Exporting D1 dev database..."
-                  npx wrangler d1 export "${{ steps.db_name.outputs.db_name }}" \
+                  echo "Exporting D1 dev database: ${D1_DATABASE_NAME_DEV}"
+                  npx wrangler d1 export "${D1_DATABASE_NAME_DEV}" \
                     --remote \
                     --output=backup.sql
                   
@@ -294,15 +268,15 @@ jobs:
                     echo "Encrypting backup with AES-256..."
                     openssl enc -aes-256-cbc -salt -pbkdf2 -iter 100000 \
                       -in backup.sql.gz \
-                      -out "vault1_dev_${{ steps.date.outputs.date }}.sql.gz.enc" \
+                      -out "${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz.enc" \
                       -pass pass:"$BACKUP_ENCRYPTION_KEY"
                     rm backup.sql.gz
-                    echo "✅ Backup encrypted: vault1_dev_${{ steps.date.outputs.date }}.sql.gz.enc"
+                    echo "✅ Backup encrypted: ${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz.enc"
                     ls -lh *.enc
                   else
                     echo "⚠️ BACKUP_ENCRYPTION_KEY not set, skipping encryption"
-                    mv backup.sql.gz "vault1_dev_${{ steps.date.outputs.date }}.sql.gz"
-                    echo "Backup file: vault1_dev_${{ steps.date.outputs.date }}.sql.gz"
+                    mv backup.sql.gz "${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz"
+                    echo "Backup file: ${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz"
                     ls -lh *.sql.gz
                   fi
 
@@ -321,9 +295,9 @@ jobs:
 
                   # Choose file extension based on encryption status
                   if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
-                    BACKUP_FILE="vault1_dev_${{ steps.date.outputs.date }}.sql.gz.enc"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz.enc"
                   else
-                    BACKUP_FILE="vault1_dev_${{ steps.date.outputs.date }}.sql.gz"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz"
                   fi
                   
                   aws s3 cp "$BACKUP_FILE" \
@@ -389,9 +363,9 @@ jobs:
                   WEBDAV_BASE_PATH: ${{ secrets.WEBDAV_BASE_PATH || 'warden-worker' }}
               run: |
                   if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
-                    BACKUP_FILE="vault1_dev_${{ steps.date.outputs.date }}.sql.gz.enc"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz.enc"
                   else
-                    BACKUP_FILE="vault1_dev_${{ steps.date.outputs.date }}.sql.gz"
+                    BACKUP_FILE="${{ env.D1_DATABASE_NAME_DEV }}_dev_${{ steps.date.outputs.date }}.sql.gz"
                   fi
                   
                   rclone mkdir "webdav:${WEBDAV_BASE_PATH}" || true

@@ -150,14 +150,35 @@ The `CLOUDFLARE_API_TOKEN` requires the following permissions:
 
 ### Optional Variables
 
+#### D1 Database Name
+
+You can override the D1 database name used by wrangler CLI commands and `wrangler.toml` via GitHub Actions Variables.
+This is useful if you created your D1 database with a custom name other than the default.
+
+| Variable | Applies to | Default | Example | Notes |
+|----------|------------|---------|---------|-------|
+| `D1_DATABASE_NAME` | prod (`main/uat/release*`) | `vault1` | `my-warden-db` | Must match the database name you created in Cloudflare |
+| `D1_DATABASE_NAME_DEV` | dev (`dev`) | `vault1-dev` | `my-warden-db-dev` | Must match the dev database name you created in Cloudflare |
+
+#### R2 Bucket Name
+
+To enable R2 attachments, add the bucket name as a GitHub Actions Secret (not a Variable, to keep it private):
+
+| Secret | Applies to | Description |
+|--------|------------|-------------|
+| `R2_NAME` | prod | Production R2 bucket name (e.g. `warden-attachments`) |
+| `R2_NAME_DEV` | dev | Dev R2 bucket name (e.g. `warden-attachments-dev`) |
+
+When these secrets are present, the workflows automatically append the `ATTACHMENTS_BUCKET` binding to `wrangler.toml`.
+
 #### Web Vault frontend version
 
 You can pin/override the bundled Web Vault (bw_web_builds) version via GitHub Actions Variables:
 
 | Variable | Applies to | Default | Example | Notes |
 |----------|------------|---------|---------|-------|
-| `BW_WEB_VERSION` | prod (`main/uat/release*`) | `v2026.4.1` | `v2026.4.1` | Set to `latest` to follow upstream latest release |
-| `BW_WEB_VERSION_DEV` | dev (`dev`) | `v2026.4.1` | `v2026.4.1` | Set to `latest` to follow upstream latest release |
+| `BW_WEB_VERSION` | prod (`main/uat/release*`) | `latest` | `v2026.4.1` | Defaults to `latest`; set to a specific tag to pin a version |
+| `BW_WEB_VERSION_DEV` | dev (`dev`) | `latest` | `v2026.4.1` | Defaults to `latest`; set to a specific tag to pin a version |
 
 #### Global Equivalent Domains
 

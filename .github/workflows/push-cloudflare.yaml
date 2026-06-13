@@ -15,10 +15,13 @@ jobs:
       # Pin tool versions to avoid upstream updates breaking CI
       WORKER_BUILD_VERSION: "0.8.3"
       WRANGLER_VERSION: "4.82.1"
-      # Web Vault frontend (bw_web_builds) version tag (default pinned; override via GitHub Actions Variables)
-      # - Set repository variable BW_WEB_VERSION (e.g. v2026.4.1) to override
-      # - Set to "latest" to follow the latest bw_web_builds release
-      BW_WEB_VERSION: ${{ vars.BW_WEB_VERSION || 'v2026.4.1' }}
+      # Web Vault frontend (bw_web_builds) version tag (default: "latest"; override via GitHub Actions Variables)
+      # - Set repository variable BW_WEB_VERSION (e.g. v2026.4.1) to pin a specific version
+      # - Defaults to "latest" to always follow the latest bw_web_builds release
+      BW_WEB_VERSION: ${{ vars.BW_WEB_VERSION || 'latest' }}
+      # D1 database name (must match the database created in Cloudflare)
+      # Override via GitHub Actions Variable D1_DATABASE_NAME (default: vault1)
+      D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME || 'vault1' }}
 
       # Required for wrangler
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -101,8 +104,10 @@ jobs:
         run: |
           mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
 
-      - name: Replace D1_DATABASE_ID in wrangler.toml
-        run: sed -i "s/\${D1_DATABASE_ID}/${{ secrets.D1_DATABASE_ID }}/g" wrangler.toml
+      - name: Substitute wrangler.toml variables (D1_DATABASE_ID, D1_DATABASE_NAME)
+        run: |
+          sed -i "s/\${D1_DATABASE_ID}/${{ secrets.D1_DATABASE_ID }}/g" wrangler.toml
+          sed -i "s/\${D1_DATABASE_NAME}/${D1_DATABASE_NAME}/g" wrangler.toml
 
       - name: Enable R2 binding when R2_NAME is provided
         env:
@@ -127,7 +132,7 @@ jobs:
 
           # Capture raw wrangler output so jq parse errors don't hide the real failure.
           set +e
-          D1_OUT="$($WRANGLER d1 execute vault1 --remote --command \
+          D1_OUT="$($WRANGLER d1 execute "${D1_DATABASE_NAME}" --remote --command \
             "SELECT COUNT(*) AS cnt FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name NOT IN ('d1_migrations');" \
             --json 2>&1)"
           D1_STATUS=$?
@@ -148,7 +153,7 @@ jobs:
           echo "Existing app table count: ${TABLE_COUNT}"
           if [ "${TABLE_COUNT}" = "0" ]; then
             echo "🆕 Empty D1 database detected; applying sql/schema.sql..."
-            $WRANGLER d1 execute vault1 --remote --file sql/schema.sql
+            $WRANGLER d1 execute "${D1_DATABASE_NAME}" --remote --file sql/schema.sql
 
             echo "📝 Marking existing migrations as applied (schema.sql already includes them)"
             BOOTSTRAP_SQL="$(mktemp)"
@@ -164,7 +169,7 @@ jobs:
               echo "INSERT OR IGNORE INTO d1_migrations (name) VALUES ('$(basename "${f}")');" >>"${BOOTSTRAP_SQL}"
             done
 
-            $WRANGLER d1 execute vault1 --remote --file "${BOOTSTRAP_SQL}"
+            $WRANGLER d1 execute "${D1_DATABASE_NAME}" --remote --file "${BOOTSTRAP_SQL}"
             rm -f "${BOOTSTRAP_SQL}"
           else
             echo "⏭️ D1 already has tables; skipping base schema bootstrap"
@@ -182,7 +187,7 @@ jobs:
           while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
             echo "🔄 Attempting to apply migrations (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
             
-            if $WRANGLER d1 migrations apply vault1 --remote 2>&1 | tee migration_output.txt; then
+            if $WRANGLER d1 migrations apply "${D1_DATABASE_NAME}" --remote 2>&1 | tee migration_output.txt; then
               echo "✅ All migrations applied successfully"
               exit 0
             fi
@@ -202,7 +207,7 @@ jobs:
               echo "📝 Marking migration as applied..."
               
               # Initialize d1_migrations table and mark this migration as applied
-              $WRANGLER d1 execute vault1 --remote --command "
+              $WRANGLER d1 execute "${D1_DATABASE_NAME}" --remote --command "
                 CREATE TABLE IF NOT EXISTS d1_migrations (
                   id INTEGER PRIMARY KEY AUTOINCREMENT,
                   name TEXT UNIQUE NOT NULL,
@@ -235,9 +240,9 @@ jobs:
           fi
 
           if [ -n "${GLOBAL_DOMAINS_URL:-}" ]; then
-            bash scripts/seed-global-domains.sh --db vault1 --remote --wrangler-version "${WRANGLER_VERSION}" --url "${GLOBAL_DOMAINS_URL}"
+            bash scripts/seed-global-domains.sh --db "${D1_DATABASE_NAME}" --remote --wrangler-version "${WRANGLER_VERSION}" --url "${GLOBAL_DOMAINS_URL}"
           else
-            bash scripts/seed-global-domains.sh --db vault1 --remote --wrangler-version "${WRANGLER_VERSION}"
+            bash scripts/seed-global-domains.sh --db "${D1_DATABASE_NAME}" --remote --wrangler-version "${WRANGLER_VERSION}"
           fi
 
       - uses: cloudflare/wrangler-action@da0e0dfe58b7a431659754fdf3f186c529afbe65 # v3

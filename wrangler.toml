@@ -100,7 +100,7 @@ crons = ["0 3 * * *"]
 
 [[d1_databases]]
 binding = "vault1"
-database_name = "vault1"
+database_name = "${D1_DATABASE_NAME}"
 database_id = "${D1_DATABASE_ID}"
 migrations_dir = "migrations"
 
@@ -143,7 +143,7 @@ simple = { limit = 5, period = 60 }
 
 [[env.dev.d1_databases]]
 binding = "vault1"
-database_name = "vault1-dev"
+database_name = "${D1_DATABASE_NAME_DEV}"
 database_id = "${D1_DATABASE_ID_DEV}"
 migrations_dir = "migrations"
 
