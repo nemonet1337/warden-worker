@@ -25,19 +25,27 @@ tag = "do_v2"
 new_sqlite_classes = ["NotifyDo"]
 
 [build]
-# Rust/WASM is prebuilt and committed under ./build (Cloudflare's build image has no
-# Rust toolchain). Run `worker-build --release --locked` locally to regenerate.
-# The frontend (bw_web_builds) is downloaded here at build time into ./public/web-vault.
+# Cloudflare's Workers Build image has no Rust toolchain preinstalled, so we bootstrap
+# one with rustup (rust-toolchain.toml pins the exact channel + wasm32 target, which
+# rustup auto-installs on first `cargo`/`rustup` invocation inside this project).
+# The frontend (bw_web_builds) is also downloaded here at build time into ./public/web-vault.
 command = """\
 set -euo pipefail
+if ! command -v rustup >/dev/null 2>&1; then
+  echo "Installing Rust toolchain via rustup..."
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
+fi
+export PATH="$HOME/.cargo/bin:$PATH"
+echo "Building Rust/WASM backend..."
+cargo install --locked -q worker-build --version 0.8.3
+worker-build --release --locked
 TAG="${BW_WEB_VERSION:-v2026.4.1}"
 echo "Downloading frontend: $TAG"
 wget -q "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
 tar -xzf "bw_web_${TAG}.tar.gz" -C public/
 find public/web-vault -type f -name '*.map' -delete
 rm -f "bw_web_${TAG}.tar.gz"
-mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
-echo "Using prebuilt WASM from ./build"\
+mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/\
 """
 
 # Rate limiting configuration for protecting sensitive endpoints

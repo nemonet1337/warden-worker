@@ -2,9 +2,9 @@
   "name": "warden-worker",
   "version": "0.7.0",
   "private": true,
-  "description": "Minimal Bitwarden-compatible backend on Cloudflare Workers (Rust/WASM prebuilt).",
+  "description": "Minimal Bitwarden-compatible backend on Cloudflare Workers (Rust/WASM).",
   "scripts": {
-    "build": "echo 'WASM is prebuilt under ./build; run worker-build locally to rebuild.'",
+    "build": "cargo install --locked -q worker-build --version 0.8.3 && worker-build --release --locked",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
