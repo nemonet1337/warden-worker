@@ -160,7 +160,7 @@ simple = { limit = 5, period = 60 }
 > [!NOTE]
 > The `period` must be either `10` or `60` seconds. See [Cloudflare documentation](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/) for details.
 
-If the binding is missing, requests proceed without rate limiting (graceful degradation).
+If the binding is missing (or the rate limiter returns an error), requests proceed without rate limiting (fail-open graceful degradation). Configure the `LOGIN_RATE_LIMITER` binding in `wrangler.toml` to enable protection.
 
 ## Configuration
 
