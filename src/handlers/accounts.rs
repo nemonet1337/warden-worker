@@ -122,6 +122,29 @@ fn validate_rotation_metadata(
     Ok(())
 }
 
+/// Load a user by id, returning `NotFound` if absent or `Internal` if the row can't be parsed.
+async fn find_user_by_id(db: &crate::db::Db, user_id: &str) -> Result<User, AppError> {
+    let user: Value = db
+        .prepare("SELECT * FROM users WHERE id = ?1")
+        .bind(&[user_id.to_string().into()])?
+        .first(None)
+        .await
+        .map_err(|_| AppError::Database)?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    serde_json::from_value(user).map_err(|_| AppError::Internal)
+}
+
+/// Verify the provided master password hash against the stored user record.
+///
+/// Returns `Unauthorized` ("Invalid password") when the hash does not match.
+async fn verify_user_password(user: &User, provided_hash: &str) -> Result<(), AppError> {
+    let verification = user.verify_master_password(provided_hash).await?;
+    if !verification.is_valid() {
+        return Err(AppError::Unauthorized("Invalid password".to_string()));
+    }
+    Ok(())
+}
+
 #[worker::send]
 pub async fn prelogin(
     State(env): State<Arc<Env>>,
@@ -343,6 +366,18 @@ pub async fn password_hint(
 
     const NO_HINT: &str = "Sorry, you have no password hint...";
 
+    // Bitwarden normally returns the hint via email; Vaultwarden hides it by default for the
+    // same reason. Gate this endpoint behind SHOW_PASSWORD_HINT (truthy) so it is opt-in.
+    let show_hint = env
+        .var("SHOW_PASSWORD_HINT")
+        .ok()
+        .map(|v| v.to_string().to_lowercase())
+        .map(|v| matches!(v.as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
+    if !show_hint {
+        return Err(AppError::BadRequest(NO_HINT.to_string()));
+    }
+
     let db = db::get_db(&env)?;
     let email = payload.email.to_lowercase();
 
@@ -560,25 +595,14 @@ pub async fn delete_account(
     let user_id = &claims.sub;
 
     // Get the user from the database
-    let user: Value = db
-        .prepare("SELECT * FROM users WHERE id = ?1")
-        .bind(&[user_id.clone().into()])?
-        .first(None)
-        .await
-        .map_err(|_| AppError::Database)?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+    let user = find_user_by_id(&db, user_id).await?;
 
     // Verify the master password hash
     let provided_hash = payload
         .master_password_hash
         .ok_or_else(|| AppError::BadRequest("Missing master password hash".to_string()))?;
 
-    let verification = user.verify_master_password(&provided_hash).await?;
-
-    if !verification.is_valid() {
-        return Err(AppError::Unauthorized("Invalid password".to_string()));
-    }
+    verify_user_password(&user, &provided_hash).await?;
 
     push::unregister_push_devices_by_user(&env, user_id).await;
 
@@ -593,36 +617,28 @@ pub async fn delete_account(
     // D1 does not enforce SQLite foreign keys by default, so cascading deletes
     // declared in the schema are not guaranteed to fire. Clean up dependent rows
     // explicitly to avoid leaking orphan auth state, push tokens, and pending uploads.
-    d1_query!(
-        &db,
-        "DELETE FROM attachments_pending WHERE cipher_id IN (SELECT id FROM ciphers WHERE user_id = ?1)",
-        user_id
-    )
-    .map_err(|_| AppError::Database)?
-    .run()
-    .await?;
-
-    // Delete all user's ciphers
-    d1_query!(&db, "DELETE FROM ciphers WHERE user_id = ?1", user_id)
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
-
-    // Delete all user's folders
-    d1_query!(&db, "DELETE FROM folders WHERE user_id = ?1", user_id)
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
-
-    d1_query!(&db, "DELETE FROM twofactor WHERE user_uuid = ?1", user_id)
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
-
-    d1_query!(&db, "DELETE FROM auth_requests WHERE user_id = ?1", user_id)
-        .map_err(|_| AppError::Database)?
-        .run()
-        .await?;
+    // These deletes are bundled into a single D1 batch, which D1 executes
+    // transactionally — either all rows are removed or none are, avoiding orphan rows
+    // if one statement fails mid-way.
+    let delete_statements = vec![
+        d1_query!(
+            &db,
+            "DELETE FROM attachments_pending WHERE cipher_id IN (SELECT id FROM ciphers WHERE user_id = ?1)",
+            user_id
+        )
+        .map_err(|_| AppError::Database)?,
+        d1_query!(&db, "DELETE FROM ciphers WHERE user_id = ?1", user_id)
+            .map_err(|_| AppError::Database)?,
+        d1_query!(&db, "DELETE FROM folders WHERE user_id = ?1", user_id)
+            .map_err(|_| AppError::Database)?,
+        d1_query!(&db, "DELETE FROM twofactor WHERE user_uuid = ?1", user_id)
+            .map_err(|_| AppError::Database)?,
+        d1_query!(&db, "DELETE FROM auth_requests WHERE user_id = ?1", user_id)
+            .map_err(|_| AppError::Database)?,
+    ];
+    db.batch(delete_statements)
+        .await
+        .map_err(AppError::Worker)?;
 
     Device::delete_all_by_user(&db, user_id).await?;
 
@@ -717,23 +733,10 @@ pub async fn post_rotatekey(
     let batch_size = get_batch_size(&env);
 
     // Get the user from the database
-    let user: Value = db
-        .prepare("SELECT * FROM users WHERE id = ?1")
-        .bind(&[user_id.clone().into()])?
-        .first(None)
-        .await
-        .map_err(|_| AppError::Database)?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+    let user = find_user_by_id(&db, user_id).await?;
 
     // Verify the current master password
-    let verification = user
-        .verify_master_password(&payload.old_master_key_authentication_hash)
-        .await?;
-
-    if !verification.is_valid() {
-        return Err(AppError::Unauthorized("Invalid password".to_string()));
-    }
+    verify_user_password(&user, &payload.old_master_key_authentication_hash).await?;
 
     let unlock_data = &payload.account_unlock_data.master_password_unlock_data;
 
@@ -998,23 +1001,13 @@ pub async fn post_kdf(
     let user_id = &claims.sub;
 
     // Get the user from the database
-    let user: Value = db
-        .prepare("SELECT * FROM users WHERE id = ?1")
-        .bind(&[user_id.clone().into()])?
-        .first(None)
-        .await
-        .map_err(|_| AppError::Database)?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-    let user: User = serde_json::from_value(user).map_err(|_| AppError::Internal)?;
+    let user = find_user_by_id(&db, user_id).await?;
 
     // Verify the current master password
-    let verification = user
-        .verify_master_password(&payload.master_password_hash)
-        .await?;
-
-    if !verification.is_valid() {
-        return Err(AppError::Unauthorized("Invalid password".to_string()));
-    }
+    let provided_hash = payload
+        .master_password_hash
+        .ok_or_else(|| AppError::BadRequest("Missing master password hash".to_string()))?;
+    verify_user_password(&user, &provided_hash).await?;
 
     let auth_data = &payload.authentication_data;
     let unlock_data = &payload.unlock_data;
@@ -1096,24 +1089,15 @@ pub async fn post_sstamp(
     let db = db::get_db(&env)?;
     let user_id = &claims.sub;
 
-    // Load the user to verify credentials
-    let user: User = db
-        .prepare("SELECT * FROM users WHERE id = ?1")
-        .bind(&[user_id.clone().into()])?
-        .first(None)
-        .await
-        .map_err(|_| AppError::Database)?
-        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+    // Get the user from the database
+    let user = find_user_by_id(&db, user_id).await?;
 
-    // Require master password hash (OTP not supported)
-    let provided_hash = payload
-        .master_password_hash
-        .ok_or_else(|| AppError::BadRequest("Missing master password hash".to_string()))?;
-
-    let verification = user.verify_master_password(&provided_hash).await?;
-    if !verification.is_valid() {
-        return Err(AppError::Unauthorized("Invalid password".to_string()));
-    }
+    // Verify the current master password
+    verify_user_password(
+        &user,
+        payload.master_password_hash.as_deref().unwrap_or_default(),
+    )
+    .await?;
 
     push::unregister_push_devices_by_user(&env, user_id).await;
 

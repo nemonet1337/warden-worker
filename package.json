@@ -1,0 +1,13 @@
+{
+  "name": "warden-worker",
+  "version": "0.7.0",
+  "private": true,
+  "description": "Minimal Bitwarden-compatible backend on Cloudflare Workers (Rust/WASM prebuilt).",
+  "scripts": {
+    "build": "echo 'WASM is prebuilt under ./build; run worker-build locally to rebuild.'",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.112.0"
+  }
+}

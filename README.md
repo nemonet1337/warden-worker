@@ -92,6 +92,7 @@ The frontend is bundled with the Worker using [Cloudflare Workers Static Assets]
 - Static files (HTML, CSS, JS) are served directly by Cloudflare's edge network.
 - API requests (`/api/*`, `/identity/*`) are routed to the Rust Worker.
 - No separate Pages deployment or domain configuration needed.
+- The repository is linked to Cloudflare, which builds and deploys automatically on push. The Rust/WASM backend is prebuilt and committed under `./build`; the frontend (`bw_web_builds`) is downloaded during the Cloudflare build step (pin via the `BW_WEB_VERSION` build variable; defaults to `v2026.4.1`).
 
 **UI overrides (optional):**
 - This project ships a small set of "lightweight self-host" UI tweaks in `public/css/`.
@@ -236,6 +237,15 @@ Configure environment variables in `wrangler.toml` under `[vars]`, or set them v
 * **`ATTACHMENT_TOTAL_LIMIT_KB`** (Optional): 
   - Max total attachment storage per user in KB. 
   - Example: `1048576` for 1GB.
+* **`LOG_LEVEL`** (Optional, Default: `info`):
+  - Log verbosity. One of `error`, `warn`, `info`, `debug`, `trace`.
+  - Defaults to `info` in production to avoid leaking sensitive metadata that `debug` may log.
+* **`SHOW_PASSWORD_HINT`** (Optional, Default: `false`):
+  - Set to `true` to allow `/api/accounts/password-hint` to return the stored hint.
+  - Defaults to off (hidden) to avoid disclosing the hint to anyone who knows the email, matching Vaultwarden's default behavior.
+* **`CORS_ALLOW_ORIGINS`** (Optional):
+  - Comma-separated list of allowed CORS origins (e.g. `https://vault.example.com,https://example.com`).
+  - If unset, all origins are allowed (`*`). Bearer-token auth means cookie-based CSRF is not a vector, but restrict this in production.
 * **`ATTACHMENT_TTL_SECS`** (Optional, Default: `300`, Minimum: `60`): 
   - TTL for attachment upload/download URLs.
 * **`SEND_TEXT_MAX_BYTES`** (Optional, Default: `1887436` ≈ 1.8 MiB):

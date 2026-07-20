@@ -229,7 +229,7 @@ pub struct UnlockData {
 pub struct ChangeKdfRequest {
     #[allow(dead_code)]
     pub key: String,
-    pub master_password_hash: String,
+    pub master_password_hash: Option<String>,
     #[allow(dead_code)]
     pub new_master_password_hash: String,
     pub authentication_data: AuthenticationData,

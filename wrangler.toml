@@ -25,7 +25,20 @@ tag = "do_v2"
 new_sqlite_classes = ["NotifyDo"]
 
 [build]
-command = "cargo install --locked -q worker-build --version 0.8.3 && worker-build --release --locked"
+# Rust/WASM is prebuilt and committed under ./build (Cloudflare's build image has no
+# Rust toolchain). Run `worker-build --release --locked` locally to regenerate.
+# The frontend (bw_web_builds) is downloaded here at build time into ./public/web-vault.
+command = """\
+set -euo pipefail
+TAG="${BW_WEB_VERSION:-v2026.4.1}"
+echo "Downloading frontend: $TAG"
+wget -q "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
+tar -xzf "bw_web_${TAG}.tar.gz" -C public/
+find public/web-vault -type f -name '*.map' -delete
+rm -f "bw_web_${TAG}.tar.gz"
+mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
+echo "Using prebuilt WASM from ./build"\
+"""
 
 # Rate limiting configuration for protecting sensitive endpoints
 # See: https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
