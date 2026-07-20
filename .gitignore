@@ -3,6 +3,7 @@ target
 node_modules
 .wrangler
 .env
+build/
 
 # Frontend files (downloaded during deployment/development)
 public/web-vault/
