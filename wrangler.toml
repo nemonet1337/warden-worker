@@ -31,7 +31,9 @@ new_sqlite_classes = ["NotifyDo"]
 # The frontend (bw_web_builds) is also downloaded here at build time into ./public/web-vault.
 # Finally, the D1_DATABASE_* placeholders below are substituted from Cloudflare Workers
 # Build "Build variables and secrets" (Settings > Build), since Wrangler does not expand
-# ${VAR} itself in config fields like database_id/database_name.
+# ${VAR} itself in config fields like database_id/database_name. The sed fallbacks below
+# are this project's own D1 database; if you fork this repo, set D1_DATABASE_NAME /
+# D1_DATABASE_ID as Build variables to point at your own database instead.
 # NOTE: Wrangler runs this command via plain `sh` (not bash), so it must stay POSIX-sh
 # compatible (no `set -o pipefail`, no bashisms). Using a literal (single-quoted) TOML
 # string here so `$` and `\` don't need escaping.
@@ -58,7 +60,7 @@ rm -f "bw_web_${TAG}.tar.gz"
 mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
 
 echo "Substituting D1 database placeholders in wrangler.toml..."
-sed -i "s/\${D1_DATABASE_NAME}/${D1_DATABASE_NAME:-vault1}/g; s/\${D1_DATABASE_ID}/${D1_DATABASE_ID:-}/g; s/\${D1_DATABASE_NAME_DEV}/${D1_DATABASE_NAME_DEV:-vault1-dev}/g; s/\${D1_DATABASE_ID_DEV}/${D1_DATABASE_ID_DEV:-}/g" wrangler.toml
+sed -i "s/\${D1_DATABASE_NAME}/${D1_DATABASE_NAME:-vault-warden}/g; s/\${D1_DATABASE_ID}/${D1_DATABASE_ID:-00a0581b-0f4d-4bca-a3a3-08ec8aadb83a}/g; s/\${D1_DATABASE_NAME_DEV}/${D1_DATABASE_NAME_DEV:-vault1-dev}/g; s/\${D1_DATABASE_ID_DEV}/${D1_DATABASE_ID_DEV:-}/g" wrangler.toml
 '''
 
 # Rate limiting configuration for protecting sensitive endpoints
