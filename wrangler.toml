@@ -153,6 +153,7 @@ migrations_dir = "migrations"
 # If R2 is not configured, KV will be used for attachments.
 [[kv_namespaces]]
 binding = "ATTACHMENTS_KV"
+id = "1452edf4aeed49abb5eed78efe197a97"
 
 [env.dev]
 name = "warden-worker-dev"
@@ -189,8 +190,10 @@ migrations_dir = "migrations"
 # bucket_name = "warden-attachments-dev"
 
 # KV namespace for file attachments in dev environment (optional, no credit card required)
+# No separate dev KV namespace exists yet, so this shares the production one.
 [[env.dev.kv_namespaces]]
 binding = "ATTACHMENTS_KV"
+id = "1452edf4aeed49abb5eed78efe197a97"
 
 # logs
 [env.dev.observability]
