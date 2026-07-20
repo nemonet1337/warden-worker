@@ -1,3 +1,31 @@
+/// Server version string reported to Bitwarden clients via `/api/version` and `/api/config`.
+///
+/// Clients use this to decide feature/backwards-compatibility behavior, so it should track
+/// the Bitwarden server version whose features this build supports.
+pub const SERVER_VERSION: &str = "2025.12.0";
+
+/// Resolve the log level from the `LOG_LEVEL` environment variable.
+///
+/// Defaults to `Info` to avoid leaking sensitive metadata at `Debug` in production.
+/// Accepts the lowercase `log` crate level names: `error`, `warn`, `info`, `debug`, `trace`.
+pub(crate) fn log_level(env: &worker::Env) -> log::Level {
+    match env
+        .var("LOG_LEVEL")
+        .ok()
+        .map(|v| v.to_string().to_lowercase())
+    {
+        Some(s) => match s.as_str() {
+            "error" => log::Level::Error,
+            "warn" => log::Level::Warn,
+            "info" => log::Level::Info,
+            "debug" => log::Level::Debug,
+            "trace" => log::Level::Trace,
+            _ => log::Level::Info,
+        },
+        None => log::Level::Info,
+    }
+}
+
 pub mod accounts;
 pub mod attachments;
 pub mod auth_requests;

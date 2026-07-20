@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use worker::Env;
 
+use crate::handlers::SERVER_VERSION;
 use crate::BaseUrl;
 
 /// Get the disable_user_registration setting from environment variable.
@@ -41,7 +42,8 @@ pub async fn config(
         // Version history:
         // - Individual cipher key encryption: 2024.2.0
         // - Mobile app support for MasterPasswordUnlockData: 2025.8.0
-        "version": "2025.12.0",
+        // (kept in sync with `src/handlers/meta.rs` via the shared `SERVER_VERSION` const)
+        "version": SERVER_VERSION,
         "gitHash": "5d84f176",
         "server": {
           "name": "Vaultwarden",

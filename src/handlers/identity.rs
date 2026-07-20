@@ -228,9 +228,23 @@ async fn authenticate_password_grant(
 ) -> Result<PasswordGrantAuthContext, AppError> {
     let password_hash = required_field(payload.password.as_deref(), "password")?;
     let device_request = parse_password_device_request(payload)?;
-    let user = User::find_by_email(db, &username.to_lowercase())
-        .await?
-        .ok_or_else(|| AppError::Unauthorized("Invalid credentials".to_string()))?;
+    let user = User::find_by_email(db, &username.to_lowercase()).await?;
+
+    // Constant-time branch for unknown users: run a dummy PBKDF2 verification so the response
+    // time is indistinguishable from a registered user (mitigates email enumeration via timing).
+    // The provided password is still required above, so this only masks the "user exists" signal.
+    let user = match user {
+        Some(user) => user,
+        None => {
+            let _ = crate::crypto::hash_password_for_storage(
+                &password_hash,
+                crate::crypto::DUMMY_SALT,
+                crate::crypto::MIN_SERVER_PBKDF2_ITERATIONS,
+            )
+            .await?;
+            return Err(AppError::Unauthorized("Invalid credentials".to_string()));
+        }
+    };
 
     // Bitwarden "login with device" flow:
     // When `authrequest` is present, clients send the auth-request access code in the `password`
@@ -747,4 +761,49 @@ fn json_err_twofactor(providers: &[i32]) -> Value {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_trimmed_i32_handles_android_quirks() {
+        // Android clients sometimes send trailing whitespace like "0 " on twoFactorProvider.
+        let req: TokenRequest =
+            serde_json::from_str(r#"{"grant_type":"x","twoFactorProvider":"0 "}"#).unwrap();
+        assert_eq!(req.two_factor_provider, Some(0));
+
+        let req: TokenRequest =
+            serde_json::from_str(r#"{"grant_type":"x","twoFactorProvider":"42"}"#).unwrap();
+        assert_eq!(req.two_factor_provider, Some(42));
+
+        let req: TokenRequest =
+            serde_json::from_str(r#"{"grant_type":"x","twoFactorProvider":""}"#).unwrap();
+        assert_eq!(req.two_factor_provider, None);
+
+        assert!(serde_json::from_str::<TokenRequest>(
+            r#"{"grant_type":"x","twoFactorProvider":"not_a_number"}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn token_request_deserializes_aliased_fields() {
+        let json = r#"{
+            "grant_type": "password",
+            "username": "user@example.com",
+            "password": "hash",
+            "clientId": "abc",
+            "scope": "api offline_access",
+            "deviceIdentifier": "dev",
+            "deviceName": "Device",
+            "deviceType": "2"
+        }"#;
+        let req: TokenRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.grant_type, "password");
+        assert_eq!(req.client_id.as_deref(), Some("abc"));
+        assert_eq!(req.device_identifier.as_deref(), Some("dev"));
+        assert_eq!(req.device_type.as_deref(), Some("2"));
+    }
 }

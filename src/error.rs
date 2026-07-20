@@ -43,10 +43,13 @@ impl IntoResponse for AppError {
             }
             other => {
                 let (status, error_message) = match other {
-                    AppError::Worker(e) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Worker error: {}", e),
-                    ),
+                    AppError::Worker(e) => {
+                        log::error!("Worker error: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error".to_string(),
+                        )
+                    }
                     AppError::Database => (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Database error".to_string(),
@@ -55,10 +58,13 @@ impl IntoResponse for AppError {
                     AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
                     AppError::Unauthorized(msg) => (StatusCode::UNAUTHORIZED, msg),
                     AppError::TooManyRequests(msg) => (StatusCode::TOO_MANY_REQUESTS, msg),
-                    AppError::Crypto(msg) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Crypto error: {}", msg),
-                    ),
+                    AppError::Crypto(msg) => {
+                        log::error!("Crypto error: {}", msg);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal server error".to_string(),
+                        )
+                    }
                     AppError::Internal => (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Internal server error".to_string(),

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use axum::http::HeaderValue;
 use axum::{extract::DefaultBodyLimit, Extension};
 use tower_http::cors::{Any, CorsLayer};
 use tower_service::Service;
@@ -25,7 +26,7 @@ pub struct BaseUrl(pub String);
 #[event(fetch)]
 pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<web_sys::Response> {
     console_error_panic_hook::set_once();
-    let _ = console_log::init_with_level(log::Level::Debug);
+    let _ = console_log::init_with_level(crate::handlers::log_level(&env));
 
     let url = req.url()?;
     let method = req.method();
@@ -54,10 +55,37 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<web_sys::Resp
 
     let env = Arc::new(env);
 
-    let cors = CorsLayer::new()
-        .allow_methods(Any)
-        .allow_headers(Any)
-        .allow_origin(Any);
+    // CORS: restrict to configured origins when CORS_ALLOW_ORIGINS is set (comma-separated).
+    // Falls back to allowing any origin only when the variable is unset, preserving prior
+    // permissive behavior. Use `Authorization` (Bearer) so cookie-based CSRF is not a vector.
+    let cors = match env.var("CORS_ALLOW_ORIGINS").ok().map(|v| v.to_string()) {
+        Some(value) if !value.trim().is_empty() => {
+            let origins: Vec<_> = value
+                .split(',')
+                .map(|o| o.trim().to_string())
+                .filter(|o| !o.is_empty())
+                .collect();
+            let allowed: Vec<HeaderValue> = origins
+                .iter()
+                .filter_map(|o| o.parse::<HeaderValue>().ok())
+                .collect();
+            if allowed.is_empty() {
+                CorsLayer::new()
+                    .allow_methods(Any)
+                    .allow_headers(Any)
+                    .allow_origin(Any)
+            } else {
+                CorsLayer::new()
+                    .allow_methods(Any)
+                    .allow_headers(Any)
+                    .allow_origin(allowed)
+            }
+        }
+        _ => CorsLayer::new()
+            .allow_methods(Any)
+            .allow_headers(Any)
+            .allow_origin(Any),
+    };
 
     const BODY_LIMIT: usize = 5 * 1024 * 1024;
 
@@ -78,7 +106,7 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<web_sys::Resp
 #[event(scheduled)]
 pub async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     console_error_panic_hook::set_once();
-    let _ = console_log::init_with_level(log::Level::Debug);
+    let _ = console_log::init_with_level(crate::handlers::log_level(&env));
 
     fn log_purge_result(name: &str, result: Result<u32, worker::Error>) {
         match result {
