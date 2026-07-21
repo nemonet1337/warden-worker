@@ -50,17 +50,21 @@ export PATH="$HOME/.cargo/bin:$PATH"
 echo "Building Rust/WASM backend..."
 cargo install --locked -q worker-build --version 0.8.3
 worker-build --release --locked
+echo "Rust/WASM build complete."
 
 TAG="${BW_WEB_VERSION:-v2026.4.1}"
 echo "Downloading frontend: $TAG"
-wget -q "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
+wget --tries=5 --waitretry=5 --retry-connrefused -nv \
+  "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
 tar -xzf "bw_web_${TAG}.tar.gz" -C public/
 find public/web-vault -type f -name '*.map' -delete
 rm -f "bw_web_${TAG}.tar.gz"
 mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
+echo "Frontend staged."
 
 echo "Substituting D1 database placeholders in wrangler.toml..."
 sed -i "s/\${D1_DATABASE_NAME}/${D1_DATABASE_NAME:-vault-warden}/g; s/\${D1_DATABASE_ID}/${D1_DATABASE_ID:-00a0581b-0f4d-4bca-a3a3-08ec8aadb83a}/g; s/\${D1_DATABASE_NAME_DEV}/${D1_DATABASE_NAME_DEV:-vault1-dev}/g; s/\${D1_DATABASE_ID_DEV}/${D1_DATABASE_ID_DEV:-}/g" wrangler.toml
+echo "Build script finished."
 '''
 
 # Rate limiting configuration for protecting sensitive endpoints
