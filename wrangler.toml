@@ -5,6 +5,15 @@ keep_vars = true
 workers_dev = false
 preview_urls = false
 
+[[routes]]
+pattern = "wardenworker.nemonet.work"
+custom_domain = true
+
+# Smart placement runs the Worker closer to the resources it calls (D1/KV/R2)
+# instead of always the request's edge location.
+[placement]
+mode = "smart"
+
 [durable_objects]
 bindings = [
   # Offload CPU-heavy endpoints to Durable Objects 
@@ -87,6 +96,9 @@ html_handling = "auto-trailing-slash"
 run_worker_first = ["/api/*", "/identity/*", "/notifications/*"]
 
 [vars]
+# Set to "false" to show the 'Create account' button in the frontend.
+DISABLE_USER_REGISTRATION = "true"
+
 # Base URL for the worker, used for generating up/down URLs for files.
 # If not set, the base URL will be extracted from the incoming request.
 # BASE_URL = "https://vault.example.com"
@@ -146,10 +158,9 @@ migrations_dir = "migrations"
 # R2 bucket for file attachments (optional, requires credit card)
 # R2 has priority: if R2 is configured, KV is ignored.
 # R2 supports larger files and streaming uploads.
-# Uncomment and configure this section to enable file attachments via R2:
-# [[r2_buckets]]
-# binding = "ATTACHMENTS_BUCKET"
-# bucket_name = "warden-attachments"
+[[r2_buckets]]
+binding = "ATTACHMENTS_BUCKET"
+bucket_name = "vault-warden"
 
 # KV namespace for file attachments (optional, no credit card required)
 # KV has a 25MB limit per file, but doesn't require credit card binding.
