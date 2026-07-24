@@ -29,14 +29,16 @@ new_sqlite_classes = ["NotifyDo"]
 # one with rustup (rust-toolchain.toml pins the exact channel + wasm32 target, which
 # rustup auto-installs on first `cargo`/`rustup` invocation inside this project).
 # The frontend (bw_web_builds) is also downloaded here at build time into ./public/web-vault.
-# Finally, the D1_DATABASE_* placeholders below are substituted from Cloudflare Workers
-# Build "Build variables and secrets" (Settings > Build), since Wrangler does not expand
-# ${VAR} itself in config fields like database_id/database_name. The sed fallbacks below
-# are this project's own D1 database; if you fork this repo, set D1_DATABASE_NAME /
-# D1_DATABASE_ID as Build variables to point at your own database instead.
 # NOTE: Wrangler runs this command via plain `sh` (not bash), so it must stay POSIX-sh
 # compatible (no `set -o pipefail`, no bashisms). Using a literal (single-quoted) TOML
 # string here so `$` and `\` don't need escaping.
+#
+# D1/KV binding IDs below are hardcoded rather than substituted from env vars at build
+# time: `wrangler deploy` re-reads wrangler.toml after [build].command runs (so a sed
+# substitution works there), but `wrangler versions upload` (used for PR/preview builds)
+# reads the config *before* running [build].command and never re-reads it — verified by
+# reproducing both commands locally. A placeholder+substitution approach is therefore
+# unreliable; if you fork this repo, replace these IDs with your own D1/KV resources.
 command = '''
 set -eu
 if ! command -v rustup >/dev/null 2>&1; then
@@ -61,9 +63,6 @@ find public/web-vault -type f -name '*.map' -delete
 rm -f "bw_web_${TAG}.tar.gz"
 mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
 echo "Frontend staged."
-
-echo "Substituting D1 database placeholders in wrangler.toml..."
-sed -i "s/\${D1_DATABASE_NAME}/${D1_DATABASE_NAME:-vault-warden}/g; s/\${D1_DATABASE_ID}/${D1_DATABASE_ID:-00a0581b-0f4d-4bca-a3a3-08ec8aadb83a}/g; s/\${D1_DATABASE_NAME_DEV}/${D1_DATABASE_NAME_DEV:-vault1-dev}/g; s/\${D1_DATABASE_ID_DEV}/${D1_DATABASE_ID_DEV:-}/g" wrangler.toml
 echo "Build script finished."
 '''
 
@@ -140,8 +139,8 @@ crons = ["0 3 * * *"]
 
 [[d1_databases]]
 binding = "vault1"
-database_name = "${D1_DATABASE_NAME}"
-database_id = "${D1_DATABASE_ID}"
+database_name = "vault-warden"
+database_id = "00a0581b-0f4d-4bca-a3a3-08ec8aadb83a"
 migrations_dir = "migrations"
 
 # R2 bucket for file attachments (optional, requires credit card)
@@ -182,6 +181,10 @@ name = "LOGIN_RATE_LIMITER"
 namespace_id = "1002"
 simple = { limit = 5, period = 60 }
 
+# No dev D1 database exists yet in this account. These placeholders are not substituted
+# (env var substitution at build time was removed - see the [build] comment above), so
+# `wrangler deploy --env dev` will fail until you create a dev D1 database and replace
+# database_name/database_id below with its real values.
 [[env.dev.d1_databases]]
 binding = "vault1"
 database_name = "${D1_DATABASE_NAME_DEV}"
