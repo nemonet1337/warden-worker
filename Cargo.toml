@@ -7,6 +7,12 @@ authors = ["qaz741wsd856"]
 [package.metadata.release]
 release = false
 
+# Skip wasm-opt: it fetches a binaryen binary from GitHub releases at build time,
+# which is one more external dependency that can fail/flake in CI. Not required for
+# correctness, only for extra size/perf optimization of the already-valid wasm output.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
 [lib]
 crate-type = ["cdylib"]
 

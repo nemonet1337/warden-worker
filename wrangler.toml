@@ -5,6 +5,15 @@ keep_vars = true
 workers_dev = false
 preview_urls = false
 
+[[routes]]
+pattern = "wardenworker.nemonet.work"
+custom_domain = true
+
+# Smart placement runs the Worker closer to the resources it calls (D1/KV/R2)
+# instead of always the request's edge location.
+[placement]
+mode = "smart"
+
 [durable_objects]
 bindings = [
   # Offload CPU-heavy endpoints to Durable Objects 
@@ -25,20 +34,46 @@ tag = "do_v2"
 new_sqlite_classes = ["NotifyDo"]
 
 [build]
-# Rust/WASM is prebuilt and committed under ./build (Cloudflare's build image has no
-# Rust toolchain). Run `worker-build --release --locked` locally to regenerate.
-# The frontend (bw_web_builds) is downloaded here at build time into ./public/web-vault.
-command = """\
-set -euo pipefail
+# Cloudflare's Workers Build image has no Rust toolchain preinstalled, so we bootstrap
+# one with rustup (rust-toolchain.toml pins the exact channel + wasm32 target, which
+# rustup auto-installs on first `cargo`/`rustup` invocation inside this project).
+# The frontend (bw_web_builds) is also downloaded here at build time into ./public/web-vault.
+# NOTE: Wrangler runs this command via plain `sh` (not bash), so it must stay POSIX-sh
+# compatible (no `set -o pipefail`, no bashisms). Using a literal (single-quoted) TOML
+# string here so `$` and `\` don't need escaping.
+#
+# D1/KV binding IDs below are hardcoded rather than substituted from env vars at build
+# time: `wrangler deploy` re-reads wrangler.toml after [build].command runs (so a sed
+# substitution works there), but `wrangler versions upload` (used for PR/preview builds)
+# reads the config *before* running [build].command and never re-reads it — verified by
+# reproducing both commands locally. A placeholder+substitution approach is therefore
+# unreliable; if you fork this repo, replace these IDs with your own D1/KV resources.
+command = '''
+set -eu
+if ! command -v rustup >/dev/null 2>&1; then
+  echo "Installing Rust toolchain via rustup..."
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
+  sh /tmp/rustup-init.sh -y --default-toolchain none --profile minimal
+  rm -f /tmp/rustup-init.sh
+fi
+export PATH="$HOME/.cargo/bin:$PATH"
+
+echo "Building Rust/WASM backend..."
+cargo install --locked -q worker-build --version 0.8.3
+worker-build --release --locked
+echo "Rust/WASM build complete."
+
 TAG="${BW_WEB_VERSION:-v2026.4.1}"
 echo "Downloading frontend: $TAG"
-wget -q "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
+wget --tries=5 --waitretry=5 --retry-connrefused -nv \
+  "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
 tar -xzf "bw_web_${TAG}.tar.gz" -C public/
 find public/web-vault -type f -name '*.map' -delete
 rm -f "bw_web_${TAG}.tar.gz"
 mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
-echo "Using prebuilt WASM from ./build"\
-"""
+echo "Frontend staged."
+echo "Build script finished."
+'''
 
 # Rate limiting configuration for protecting sensitive endpoints
 # See: https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
@@ -61,6 +96,9 @@ html_handling = "auto-trailing-slash"
 run_worker_first = ["/api/*", "/identity/*", "/notifications/*"]
 
 [vars]
+# Set to "false" to show the 'Create account' button in the frontend.
+DISABLE_USER_REGISTRATION = "true"
+
 # Base URL for the worker, used for generating up/down URLs for files.
 # If not set, the base URL will be extracted from the incoming request.
 # BASE_URL = "https://vault.example.com"
@@ -113,23 +151,23 @@ crons = ["0 3 * * *"]
 
 [[d1_databases]]
 binding = "vault1"
-database_name = "${D1_DATABASE_NAME}"
-database_id = "${D1_DATABASE_ID}"
+database_name = "vault-warden"
+database_id = "00a0581b-0f4d-4bca-a3a3-08ec8aadb83a"
 migrations_dir = "migrations"
 
 # R2 bucket for file attachments (optional, requires credit card)
 # R2 has priority: if R2 is configured, KV is ignored.
 # R2 supports larger files and streaming uploads.
-# Uncomment and configure this section to enable file attachments via R2:
-# [[r2_buckets]]
-# binding = "ATTACHMENTS_BUCKET"
-# bucket_name = "warden-attachments"
+[[r2_buckets]]
+binding = "ATTACHMENTS_BUCKET"
+bucket_name = "vault-warden"
 
 # KV namespace for file attachments (optional, no credit card required)
 # KV has a 25MB limit per file, but doesn't require credit card binding.
 # If R2 is not configured, KV will be used for attachments.
 [[kv_namespaces]]
 binding = "ATTACHMENTS_KV"
+id = "1452edf4aeed49abb5eed78efe197a97"
 
 [env.dev]
 name = "warden-worker-dev"
@@ -154,6 +192,10 @@ name = "LOGIN_RATE_LIMITER"
 namespace_id = "1002"
 simple = { limit = 5, period = 60 }
 
+# No dev D1 database exists yet in this account. These placeholders are not substituted
+# (env var substitution at build time was removed - see the [build] comment above), so
+# `wrangler deploy --env dev` will fail until you create a dev D1 database and replace
+# database_name/database_id below with its real values.
 [[env.dev.d1_databases]]
 binding = "vault1"
 database_name = "${D1_DATABASE_NAME_DEV}"
@@ -166,8 +208,10 @@ migrations_dir = "migrations"
 # bucket_name = "warden-attachments-dev"
 
 # KV namespace for file attachments in dev environment (optional, no credit card required)
+# No separate dev KV namespace exists yet, so this shares the production one.
 [[env.dev.kv_namespaces]]
 binding = "ATTACHMENTS_KV"
+id = "1452edf4aeed49abb5eed78efe197a97"
 
 # logs
 [env.dev.observability]
