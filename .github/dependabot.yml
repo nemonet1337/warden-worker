@@ -1,18 +1,106 @@
+# Cloudflare Workers (Rust/WASM) + wrangler
 version: 2
 updates:
-  - package-ecosystem: "cargo"
-    directory: "/"
+  - package-ecosystem: cargo
+    directory: /
     schedule:
-      interval: "monthly"
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
     open-pull-requests-limit: 10
     labels:
-      - "dependencies"
-      - "rust"
+      - dependencies
+      - rust
+    groups:
+      worker-wasm:
+        patterns:
+          - "worker"
+          - "worker-*"
+          - "wasm-bindgen*"
+          - "js-sys"
+          - "web-sys"
+          - "wasm-streams"
+          - "console_*"
+        update-types:
+          - minor
+          - patch
+      web:
+        patterns:
+          - "axum"
+          - "tower*"
+          - "bytes"
+          - "futures*"
+        update-types:
+          - minor
+          - patch
+      serde:
+        patterns:
+          - "serde*"
+          - "rmpv"
+        update-types:
+          - minor
+          - patch
+      crypto:
+        patterns:
+          - "jwt-compact"
+          - "base64"
+          - "base32"
+          - "pbkdf2"
+          - "sha2"
+          - "hex"
+          - "getrandom"
+          - "constant_time_eq"
+        update-types:
+          - minor
+          - patch
+      utils:
+        patterns:
+          - "chrono"
+          - "uuid"
+          - "log"
+          - "thiserror"
+          - "once_cell"
+          - "glob-match"
+        update-types:
+          - minor
+          - patch
 
-  - package-ecosystem: "github-actions"
-    directory: "/"
+  - package-ecosystem: npm
+    directory: /
     schedule:
-      interval: "weekly"
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
     labels:
-      - "dependencies"
-      - "github-actions"
+      - dependencies
+      - npm
+    groups:
+      cloudflare:
+        patterns:
+          - "wrangler"
+          - "@cloudflare/*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
