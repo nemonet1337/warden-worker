@@ -52,7 +52,7 @@ pbkdf2 = "0.13"
 sha2 = "0.11"
 hex = "0.4"
 getrandom = { version = "0.4", features = ["wasm_js"] }
-constant_time_eq = "0.4"
+constant_time_eq = "0.5"
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
