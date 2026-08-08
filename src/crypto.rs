@@ -23,6 +23,11 @@ pub const PASSWORD_SALT_LENGTH: usize = 64;
 /// Derived key length in bits
 const KEY_LENGTH_BITS: u32 = 256;
 
+/// A fixed base64-encoded salt used to burn CPU on the unknown-user login path so that
+/// response timing is indistinguishable from a registered user (mitigates email enumeration).
+pub const DUMMY_SALT: &str =
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+
 /// Gets the Crypto interface from the global scope.
 /// Works in Cloudflare Workers by using js_sys::Reflect instead of WorkerGlobalScope.
 fn get_crypto() -> Result<Crypto, AppError> {
@@ -319,4 +324,48 @@ pub fn generate_recovery_code() -> Result<String, AppError> {
 /// Constant-time string comparison wrapper.
 pub fn ct_eq(a: &str, b: &str) -> bool {
     constant_time_eq(a.as_bytes(), b.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pbkdf2_sha256_is_deterministic_and_distinct() {
+        let salt = vec![0u8; 16];
+        let a = pbkdf2_sha256(b"password", &salt, 1000, 256).unwrap();
+        let b = pbkdf2_sha256(b"password", &salt, 1000, 256).unwrap();
+        let c = pbkdf2_sha256(b"password", &salt, 1001, 256).unwrap();
+        assert_eq!(a, b, "same inputs must produce identical output");
+        assert_ne!(
+            a, c,
+            "different iteration counts must produce different output"
+        );
+        assert_eq!(a.len(), 32, "256-bit key -> 32 bytes");
+    }
+
+    #[test]
+    fn pbkdf2_sha256_rejects_non_byte_aligned_length() {
+        assert!(pbkdf2_sha256(b"x", &[], 1, 255).is_err());
+    }
+
+    #[test]
+    fn base32_roundtrip() {
+        let data = b"hello warden";
+        let encoded = base32_encode(data);
+        let decoded = base32_decode(&encoded).unwrap();
+        assert_eq!(decoded, data);
+    }
+
+    #[test]
+    fn base32_decode_rejects_garbage() {
+        assert!(base32_decode("!!!!").is_err());
+    }
+
+    #[test]
+    fn ct_eq_is_constant_time_equivalent() {
+        assert!(ct_eq("secret", "secret"));
+        assert!(!ct_eq("secret", "Secret"));
+        assert!(!ct_eq("", "x"));
+    }
 }

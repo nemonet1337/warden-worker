@@ -12,8 +12,6 @@ use worker::Env;
 
 use crate::db;
 use crate::error::AppError;
-use crate::models::device::Device;
-
 pub(crate) const JWT_VALIDATION_LEEWAY_SECS: u64 = 60;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -114,20 +112,26 @@ pub(crate) async fn decode_access_token(env: &Env, token: &str) -> Result<Claims
     let claims = token.into_parts().1.custom;
 
     let db = db::get_db_unconstrained(env)?;
-    let current_sstamp = db
-        .prepare("SELECT security_stamp FROM users WHERE id = ?1")
-        .bind(&[claims.sub.clone().into()])?
+    // Combine the security-stamp lookup and device-existence check into a single query
+    // (JOIN on devices). A missing row means either the user or the device is gone,
+    // which both map to an invalid token.
+    let current_sstamp: Option<String> = db
+        .prepare(
+            "SELECT u.security_stamp AS security_stamp FROM users u \
+             JOIN devices d ON d.user_id = u.id AND d.identifier = ?1 \
+             WHERE u.id = ?2",
+        )
+        .bind(&[claims.device.clone().into(), claims.sub.clone().into()])?
         .first::<String>(Some("security_stamp"))
         .await
-        .map_err(|_| AppError::Database)?
-        .ok_or_else(|| AppError::Unauthorized("Invalid token".to_string()))?;
+        .map_err(|_| AppError::Database)?;
 
-    if !constant_time_eq(claims.sstamp.as_bytes(), current_sstamp.as_bytes()) {
+    if current_sstamp.is_none() {
         return Err(AppError::Unauthorized("Invalid token".to_string()));
     }
 
-    let device = Device::find_by_identifier_and_user(&db, &claims.device, &claims.sub).await?;
-    if device.is_none() {
+    let current_sstamp = current_sstamp.unwrap();
+    if !constant_time_eq(claims.sstamp.as_bytes(), current_sstamp.as_bytes()) {
         return Err(AppError::Unauthorized("Invalid token".to_string()));
     }
 

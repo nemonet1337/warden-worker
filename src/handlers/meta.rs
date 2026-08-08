@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use worker::Env;
 
+use crate::handlers::SERVER_VERSION;
 use crate::{db, error::AppError};
 
 /// GET /api/now
@@ -34,8 +35,7 @@ pub async fn alive(State(env): State<Arc<Env>>) -> Result<Json<String>, AppError
 /// Returns a Bitwarden-server-like version string. Clients sometimes call this endpoint.
 #[worker::send]
 pub async fn version() -> Json<&'static str> {
-    // Keep this in sync with `src/handlers/config.rs`'s `version`.
-    Json("2025.12.0")
+    Json(SERVER_VERSION)
 }
 
 #[derive(Debug, Deserialize)]

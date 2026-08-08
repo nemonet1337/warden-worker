@@ -92,7 +92,7 @@ The frontend is bundled with the Worker using [Cloudflare Workers Static Assets]
 - Static files (HTML, CSS, JS) are served directly by Cloudflare's edge network.
 - API requests (`/api/*`, `/identity/*`) are routed to the Rust Worker.
 - No separate Pages deployment or domain configuration needed.
-- The repository is linked to Cloudflare, which builds and deploys automatically on push. The Rust/WASM backend is prebuilt and committed under `./build`; the frontend (`bw_web_builds`) is downloaded during the Cloudflare build step (pin via the `BW_WEB_VERSION` build variable; defaults to `v2026.4.1`).
+- The repository is linked to Cloudflare, which builds and deploys automatically on push. The Rust/WASM backend is compiled during the Cloudflare build step (`[build]` in `wrangler.toml` bootstraps a Rust toolchain via rustup, since Cloudflare's build image doesn't ship one); the frontend (`bw_web_builds`) is downloaded there too (pin via the `BW_WEB_VERSION` build variable; defaults to `v2026.4.1`).
 
 **UI overrides (optional):**
 - This project ships a small set of "lightweight self-host" UI tweaks in `public/css/`.
