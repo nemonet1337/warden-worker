@@ -59,11 +59,11 @@ fi
 export PATH="$HOME/.cargo/bin:$PATH"
 
 echo "Building Rust/WASM backend..."
-cargo install --locked -q worker-build --version 0.8.3
+cargo install --locked -q worker-build --version 0.8.5
 worker-build --release --locked
 echo "Rust/WASM build complete."
 
-TAG="${BW_WEB_VERSION:-v2026.4.1}"
+TAG="${BW_WEB_VERSION:-v2026.6.4}"
 echo "Downloading frontend: $TAG"
 wget --tries=5 --waitretry=5 --retry-connrefused -nv \
   "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
@@ -85,6 +85,12 @@ namespace_id = "1001"
 # Allow 5 requests per 60 seconds per key (email or IP)
 # This prevents brute force attacks while allowing legitimate login attempts
 simple = { limit = 5, period = 60 }
+
+[[ratelimits]]
+name = "SEND_ACCESS_RATE_LIMITER"
+namespace_id = "1003"
+# Allow 15 password attempts per minute per IP for public Send access.
+simple = { limit = 15, period = 60 }
 
 # Static assets configuration for serving frontend
 # Frontend files (bw_web_builds) are expected under ./public/web-vault before deployment
@@ -191,6 +197,11 @@ crons = ["0 3 * * *"]
 name = "LOGIN_RATE_LIMITER"
 namespace_id = "1002"
 simple = { limit = 5, period = 60 }
+
+[[env.dev.ratelimits]]
+name = "SEND_ACCESS_RATE_LIMITER"
+namespace_id = "1004"
+simple = { limit = 10, period = 60 }
 
 # No dev D1 database exists yet in this account. These placeholders are not substituted
 # (env var substitution at build time was removed - see the [build] comment above), so

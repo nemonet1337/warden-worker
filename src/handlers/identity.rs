@@ -1,4 +1,9 @@
-use axum::{extract::State, http::HeaderMap, Form, Json};
+use axum::{
+    extract::State,
+    http::HeaderMap,
+    response::{IntoResponse, Response},
+    Form, Json,
+};
 use chrono::{Duration, Utc};
 use constant_time_eq::constant_time_eq;
 use jwt_compact::AlgorithmExt;
@@ -10,18 +15,23 @@ use worker::Env;
 
 use crate::d1_query;
 use crate::{
-    auth::{jwt_time_options, Claims},
+    auth::{
+        jwt_time_options,
+        send::{create_send_access_token, SEND_ACCESS_TOKEN_TTL_SECS},
+        Claims,
+    },
     client_context::{parse_required_device_type, request_ip_from_headers},
     crypto::{ct_eq, generate_salt, hash_password_for_storage, validate_totp},
     db,
     error::AppError,
     handlers::{
-        allow_totp_drift, server_password_iterations,
+        allow_totp_drift, enforce_ip_rate_limit, enforce_rate_limit, server_password_iterations,
         twofactor::{is_twofactor_enabled, list_user_twofactors},
     },
     models::{
         auth_request::AuthRequest,
         device::{Device, DeviceType},
+        send::{SendAccessTokenResponse, SendDB},
         twofactor::{TwoFactor, TwoFactorType},
         user::User,
     },
@@ -63,6 +73,8 @@ pub struct TokenRequest {
     refresh_token: Option<String>,
     #[serde(rename = "client_id", alias = "clientId")]
     client_id: Option<String>,
+    send_id: Option<String>,
+    password_hash_b64: Option<String>,
     scope: Option<String>,
     #[serde(rename = "authrequest", alias = "authRequest")]
     auth_request: Option<String>,
@@ -220,7 +232,53 @@ fn parse_password_device_request(payload: &TokenRequest) -> Result<DeviceAuthReq
     })
 }
 
+async fn generate_send_access_token_response(
+    env: &Env,
+    db: &crate::db::Db,
+    headers: &HeaderMap,
+    payload: &TokenRequest,
+) -> Result<Json<SendAccessTokenResponse>, AppError> {
+    let _client_id = required_field(payload.client_id.as_deref(), "client_id")?;
+    let access_id = required_field(payload.send_id.as_deref(), "send_id")?;
+    let mut send = SendDB::find_by_access_id(db, &access_id)
+        .await?
+        .ok_or_else(AppError::send_access_invalid)?;
+
+    if send.validate_access().is_err() {
+        return Err(AppError::send_access_invalid());
+    }
+
+    if send.has_password() {
+        enforce_ip_rate_limit(
+            env,
+            headers,
+            "SEND_ACCESS_RATE_LIMITER",
+            "send-access",
+            "Too many send password attempts. Please try again later.",
+        )
+        .await?;
+
+        let password_hash_b64 =
+            required_field(payload.password_hash_b64.as_deref(), "password_hash_b64")
+                .map_err(|_| AppError::send_access_password_required())?;
+        if !send.check_password(&password_hash_b64).await? {
+            return Err(AppError::send_access_password_invalid());
+        }
+    }
+
+    send.increment_access_count(db).await?;
+    let access_token = create_send_access_token(env, &send.id)?;
+
+    Ok(Json(SendAccessTokenResponse {
+        access_token,
+        expires_in: SEND_ACCESS_TOKEN_TTL_SECS,
+        token_type: "Bearer".to_string(),
+        scope: "api.send.access".to_string(),
+    }))
+}
+
 async fn authenticate_password_grant(
+    _env: &Env,
     db: &crate::db::Db,
     headers: &HeaderMap,
     payload: &TokenRequest,
@@ -228,14 +286,12 @@ async fn authenticate_password_grant(
 ) -> Result<PasswordGrantAuthContext, AppError> {
     let password_hash = required_field(payload.password.as_deref(), "password")?;
     let device_request = parse_password_device_request(payload)?;
-    let user = User::find_by_email(db, &username.to_lowercase()).await?;
-
-    // Constant-time branch for unknown users: run a dummy PBKDF2 verification so the response
-    // time is indistinguishable from a registered user (mitigates email enumeration via timing).
-    // The provided password is still required above, so this only masks the "user exists" signal.
-    let user = match user {
+    let user = match User::find_by_email(db, &username.to_lowercase()).await? {
         Some(user) => user,
         None => {
+            // Constant-time branch for unknown users: run a dummy PBKDF2 verification so the
+            // response time is indistinguishable from a registered user (mitigates email
+            // enumeration via timing).
             let _ = crate::crypto::hash_password_for_storage(
                 &password_hash,
                 crate::crypto::DUMMY_SALT,
@@ -516,31 +572,36 @@ pub async fn token(
     State(env): State<Arc<Env>>,
     headers: HeaderMap,
     Form(payload): Form<TokenRequest>,
-) -> Result<Json<TokenResponse>, AppError> {
+) -> Result<Response, AppError> {
     let db = db::get_db(&env)?;
 
     match payload.grant_type.as_str() {
         "password" => {
             let username = required_field(payload.username.as_deref(), "username")?;
 
-            // Check rate limit using email as key to prevent brute force attacks.
-            if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
-                let rate_limit_key = format!("login:{}", username.to_lowercase());
-                if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
-                    if !outcome.success {
-                        return Err(AppError::TooManyRequests(
-                            "Too many login attempts. Please try again later.".to_string(),
-                        ));
-                    }
-                }
-            }
+            enforce_rate_limit(
+                env.as_ref(),
+                "LOGIN_RATE_LIMITER",
+                format!("login:{}", username.to_lowercase()),
+                "Too many login attempts. Please try again later.",
+            )
+            .await?;
+            enforce_ip_rate_limit(
+                env.as_ref(),
+                &headers,
+                "LOGIN_RATE_LIMITER",
+                "login-ip",
+                "Too many login attempts. Please try again later.",
+            )
+            .await?;
 
             let PasswordGrantAuthContext {
                 user,
                 device_request,
                 password_hash,
                 needs_migration,
-            } = authenticate_password_grant(&db, &headers, &payload, &username).await?;
+            } = authenticate_password_grant(env.as_ref(), &db, &headers, &payload, &username)
+                .await?;
 
             let mut device = Device::get_or_create(
                 &db,
@@ -692,6 +753,7 @@ pub async fn token(
                 &env,
                 two_factor_remember_token,
             )
+            .map(IntoResponse::into_response)
         }
         "refresh_token" => {
             // When a refresh token is invalid or missing we need to respond with an HTTP BadRequest (400)
@@ -739,7 +801,11 @@ pub async fn token(
             let client_id = optional_field(payload.client_id.as_deref())
                 .unwrap_or_else(|| "undefined".to_string());
             generate_tokens_and_response(user, &device, &client_id, &env, None)
+                .map(IntoResponse::into_response)
         }
+        "send_access" => generate_send_access_token_response(env.as_ref(), &db, &headers, &payload)
+            .await
+            .map(IntoResponse::into_response),
         _ => Err(AppError::BadRequest("Unsupported grant_type".to_string())),
     }
 }

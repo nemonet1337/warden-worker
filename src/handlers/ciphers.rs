@@ -46,23 +46,24 @@ async fn fetch_cipher_for_user(
         .ok_or_else(|| AppError::NotFound("Cipher not found".to_string()))
 }
 
-/// Validate that the given folder belongs to the user. No-op when folder_id is None.
-async fn ensure_folder_for_user(
+/// Validates that an optional folder belongs to the user. An absent or empty folder ID clears
+/// the cipher's folder assignment and therefore requires no ownership check.
+async fn validate_folder_ownership(
     db: &crate::db::Db,
     folder_id: Option<&str>,
     user_id: &str,
 ) -> Result<(), AppError> {
-    let Some(folder_id) = folder_id else {
+    let Some(folder_id) = folder_id.filter(|folder_id| !folder_id.is_empty()) else {
         return Ok(());
     };
 
-    let exists: Option<serde_json::Value> = db
+    let folder_exists: Option<Value> = db
         .prepare("SELECT id FROM folders WHERE id = ?1 AND user_id = ?2")
         .bind(&[folder_id.to_string().into(), user_id.to_string().into()])?
         .first(None)
         .await?;
 
-    if exists.is_none() {
+    if folder_exists.is_none() {
         return Err(AppError::BadRequest(
             "Invalid folder: Folder does not exist or belongs to another user".to_string(),
         ));
@@ -81,7 +82,7 @@ pub async fn create_cipher(
     let now = db::now_string();
     let cipher_data_req = payload.cipher;
 
-    ensure_folder_for_user(&db, cipher_data_req.folder_id.as_deref(), &claims.sub).await?;
+    validate_folder_ownership(&db, cipher_data_req.folder_id.as_deref(), &claims.sub).await?;
 
     let cipher_data = CipherData::new(
         cipher_data_req.name,
@@ -163,20 +164,7 @@ pub async fn update_cipher(
 
     let existing_cipher = fetch_cipher_for_user(&db, &id, &claims.sub).await?;
 
-    // Validate folder ownership if provided
-    if let Some(ref folder_id) = payload.folder_id {
-        let folder_exists: Option<serde_json::Value> = db
-            .prepare("SELECT id FROM folders WHERE id = ?1 AND user_id = ?2")
-            .bind(&[folder_id.clone().into(), claims.sub.clone().into()])?
-            .first(None)
-            .await?;
-
-        if folder_exists.is_none() {
-            return Err(AppError::BadRequest(
-                "Invalid folder: Folder does not exist or belongs to another user".to_string(),
-            ));
-        }
-    }
+    validate_folder_ownership(&db, payload.folder_id.as_deref(), &claims.sub).await?;
 
     // Reject updates based on stale client data when the last known revision is provided
     if let Some(dt) = payload.last_known_revision_date.as_deref() {
@@ -336,20 +324,7 @@ pub async fn update_cipher_partial(
     let db = db::get_db(&env)?;
     let user_id = &claims.sub;
 
-    // Validate folder ownership if provided
-    if let Some(ref folder_id) = payload.folder_id {
-        let folder_exists: Option<serde_json::Value> = db
-            .prepare("SELECT id FROM folders WHERE id = ?1 AND user_id = ?2")
-            .bind(&[folder_id.clone().into(), user_id.clone().into()])?
-            .first(None)
-            .await?;
-
-        if folder_exists.is_none() {
-            return Err(AppError::BadRequest(
-                "Invalid folder: Folder does not exist or belongs to another user".to_string(),
-            ));
-        }
-    }
+    validate_folder_ownership(&db, payload.folder_id.as_deref(), user_id).await?;
 
     // Ensure cipher exists and belongs to user
     fetch_cipher_for_user(&db, &id, user_id).await?;
@@ -822,7 +797,7 @@ pub async fn create_cipher_simple(
     let db = db::get_db(&env)?;
     let now = db::now_string();
 
-    ensure_folder_for_user(&db, payload.folder_id.as_deref(), &claims.sub).await?;
+    validate_folder_ownership(&db, payload.folder_id.as_deref(), &claims.sub).await?;
 
     let cipher_data = CipherData::new(payload.name, payload.notes, payload.type_fields);
 
@@ -1074,6 +1049,9 @@ fn cipher_json_expr(attachments_enabled: bool) -> String {
             'card', CASE WHEN c.type = 3 THEN json_extract(c.data, '$.card') ELSE NULL END,
             'identity', CASE WHEN c.type = 4 THEN json_extract(c.data, '$.identity') ELSE NULL END,
             'sshKey', CASE WHEN c.type = 5 THEN json_extract(c.data, '$.sshKey') ELSE NULL END,
+            'bankAccount', CASE WHEN c.type = 6 THEN json_extract(c.data, '$.bankAccount') ELSE NULL END,
+            'driversLicense', CASE WHEN c.type = 7 THEN json_extract(c.data, '$.driversLicense') ELSE NULL END,
+            'passport', CASE WHEN c.type = 8 THEN json_extract(c.data, '$.passport') ELSE NULL END,
             'key', json_extract(c.data, '$.key')
         )",
         attachments_expr = attachments_expr,
