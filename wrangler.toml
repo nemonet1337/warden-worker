@@ -33,16 +33,22 @@ new_sqlite_classes = ["HeavyDo"]
 tag = "do_v2"
 new_sqlite_classes = ["NotifyDo"]
 
-# Compile Rust/WASM only. Toolchain install + frontend staging live outside Wrangler:
-# locally via rustup and a bw_web_builds extract; in CI via Cloudflare Workers Builds
-# (`scripts/cf-build.sh` as the dashboard Build command).
+# Workers Builds default deploy is `npx wrangler deploy`, which still runs this
+# custom build. The build image has no Rust, so CI bootstraps via cf-build.sh.
+# Locally just compile WASM (rustup + worker-build already on PATH).
 #
 # D1/KV binding IDs below are hardcoded. Wrangler does not expand ${VAR} in this file,
 # and `wrangler versions upload` (PR/preview builds) reads the config before [build]
 # runs and never re-reads it — so a placeholder+sed approach is unreliable. If you
 # fork this repo, replace these IDs with your own D1/KV resources.
 [build]
-command = "worker-build --release --locked"
+command = '''
+if [ "${WORKERS_CI:-}" = "1" ]; then
+  bash scripts/cf-build.sh
+else
+  worker-build --release --locked
+fi
+'''
 
 # Rate limiting configuration for protecting sensitive endpoints
 # See: https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
