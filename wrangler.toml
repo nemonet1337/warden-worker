@@ -167,6 +167,26 @@ DISABLE_USER_REGISTRATION = "true"
 # Defaults to 300 seconds (5 minutes) if not set.
 # ATTACHMENT_TTL_SECS = "300"
 
+# Workers Logs + Traces (dashboard: Worker → Observability).
+# Automatic spans cover fetch, D1, R2, Durable Objects, and handlers — no SDK.
+# 100% sampling is appropriate for a personal vault; lower head_sampling_rate if volume grows.
+# Redeploy is required for this to take effect.
+# Docs: https://developers.cloudflare.com/workers/observability/logs/workers-logs/
+#       https://developers.cloudflare.com/workers/observability/traces/
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+head_sampling_rate = 1
+persist = true
+
+[observability.traces]
+enabled = true
+head_sampling_rate = 1
+persist = true
+
 # Cron triggers for scheduled tasks
 # Runs daily at 03:00 UTC to purge soft-deleted ciphers
 [triggers]
@@ -247,8 +267,10 @@ migrations_dir = "migrations"
 binding = "ATTACHMENTS_KV"
 id = "1452edf4aeed49abb5eed78efe197a97"
 
-# logs
+# logs + traces
 [env.dev.observability]
+enabled = true
+
 [env.dev.observability.logs]
 enabled = true
 head_sampling_rate = 1
@@ -256,6 +278,6 @@ invocation_logs = true
 persist = true
 
 [env.dev.observability.traces]
-enabled = false
+enabled = true
 persist = true
 head_sampling_rate = 1
