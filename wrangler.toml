@@ -33,58 +33,16 @@ new_sqlite_classes = ["HeavyDo"]
 tag = "do_v2"
 new_sqlite_classes = ["NotifyDo"]
 
-[build]
-# Cloudflare's Workers Build image has no Rust toolchain preinstalled, so we bootstrap
-# one with rustup (rust-toolchain.toml pins the exact channel + wasm32 target, which
-# rustup auto-installs on first `cargo`/`rustup` invocation inside this project).
-# The frontend (bw_web_builds) is also downloaded here at build time into ./public/web-vault.
-# NOTE: Wrangler runs this command via plain `sh` (not bash), so it must stay POSIX-sh
-# compatible (no `set -o pipefail`, no bashisms). Using a literal (single-quoted) TOML
-# string here so `$` and `\` don't need escaping.
+# Compile Rust/WASM only. Toolchain install + frontend staging live outside Wrangler:
+# locally via rustup and a bw_web_builds extract; in CI via Cloudflare Workers Builds
+# (`scripts/cf-build.sh` as the dashboard Build command).
 #
-# D1/KV binding IDs below are hardcoded rather than substituted from env vars at build
-# time: `wrangler deploy` re-reads wrangler.toml after [build].command runs (so a sed
-# substitution works there), but `wrangler versions upload` (used for PR/preview builds)
-# reads the config *before* running [build].command and never re-reads it — verified by
-# reproducing both commands locally. A placeholder+substitution approach is therefore
-# unreliable; if you fork this repo, replace these IDs with your own D1/KV resources.
-command = '''
-set -eu
-if ! command -v rustup >/dev/null 2>&1; then
-  echo "Installing Rust toolchain via rustup..."
-  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o /tmp/rustup-init.sh
-  sh /tmp/rustup-init.sh -y --default-toolchain none --profile minimal
-  rm -f /tmp/rustup-init.sh
-fi
-export PATH="$HOME/.cargo/bin:$PATH"
-
-# rust-toolchain.toml lists rustfmt/clippy/rust-analyzer/rust-src for local DX.
-# Pin RUSTUP_TOOLCHAIN so rustup does not download those extra components here.
-TOOLCHAIN=$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n 1)
-if [ -z "$TOOLCHAIN" ]; then
-  echo "ERROR: could not read [toolchain].channel from rust-toolchain.toml" >&2
-  exit 1
-fi
-export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
-echo "Installing Rust $TOOLCHAIN + wasm32-unknown-unknown"
-rustup toolchain install "$TOOLCHAIN" --profile minimal --target wasm32-unknown-unknown
-
-echo "Building Rust/WASM backend..."
-cargo install --locked -q worker-build --version 0.8.5
-worker-build --release --locked
-echo "Rust/WASM build complete."
-
-TAG="${BW_WEB_VERSION:-v2026.7.0}"
-echo "Downloading frontend: $TAG"
-wget --tries=5 --waitretry=5 --retry-connrefused -nv \
-  "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
-tar -xzf "bw_web_${TAG}.tar.gz" -C public/
-find public/web-vault -type f -name '*.map' -delete
-rm -f "bw_web_${TAG}.tar.gz"
-mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
-echo "Frontend staged."
-echo "Build script finished."
-'''
+# D1/KV binding IDs below are hardcoded. Wrangler does not expand ${VAR} in this file,
+# and `wrangler versions upload` (PR/preview builds) reads the config before [build]
+# runs and never re-reads it — so a placeholder+sed approach is unreliable. If you
+# fork this repo, replace these IDs with your own D1/KV resources.
+[build]
+command = "npm run build"
 
 # Rate limiting configuration for protecting sensitive endpoints
 # See: https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/
@@ -246,10 +204,9 @@ name = "ICON_RATE_LIMITER"
 namespace_id = "1006"
 simple = { limit = 120, period = 60 }
 
-# No dev D1 database exists yet in this account. These placeholders are not substituted
-# (env var substitution at build time was removed - see the [build] comment above), so
-# `wrangler deploy --env dev` will fail until you create a dev D1 database and replace
-# database_name/database_id below with its real values.
+# No dev D1 database exists yet in this account. Wrangler does not expand ${VAR} in
+# this file, so `wrangler deploy --env dev` will fail until you create a dev D1
+# database and replace database_name/database_id below with its real values.
 [[env.dev.d1_databases]]
 binding = "vault1"
 database_name = "${D1_DATABASE_NAME_DEV}"

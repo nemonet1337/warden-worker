@@ -267,7 +267,7 @@ Because this is a Rust→WASM Worker (the Workers Builds image does not ship Rus
    | **Build command** | `bash scripts/cf-build.sh` |
    | **Deploy command** | `bash scripts/cf-deploy.sh` |
 
-   > `cf-deploy.sh` prepends `$HOME/.cargo/bin` to `PATH` so that `wrangler deploy` can find `cargo`/`worker-build` (installed during the build phase) when it re-runs `wrangler.toml`'s `[build]` step.
+   > `cf-deploy.sh` prepends `$HOME/.cargo/bin` to `PATH` so that `wrangler deploy` can find `cargo`/`worker-build` (installed during the build phase) when it re-runs the WASM compile in `wrangler.toml`'s `[build]`.
 
 4. Add **Build variables** (Settings → Build → *Variables and Secrets*). None are secrets — the deploy credential is the build token from step 2.
 

@@ -15,8 +15,8 @@
 #   > add  Account > D1 > Edit.  (Workers Scripts/KV/R2 are already included.)
 #   Without this, the migration step below fails with an authorization error.
 #
-# This runs the D1 bootstrap/migrate/seed, then `wrangler deploy` (which re-runs
-# worker-build incrementally via wrangler.toml's [build] and uploads the Worker).
+# This runs the D1 bootstrap/migrate/seed, then `wrangler deploy` (which
+# incrementally re-runs worker-build via wrangler.toml's [build], then uploads).
 #
 # Build variables (Settings > Build > "Variables and Secrets"):
 #   WRANGLER_VERSION      (optional)  pinned wrangler (default below)
@@ -32,7 +32,7 @@ set -euo pipefail
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 # cf-build.sh installed the Rust toolchain into $HOME/.cargo (shared workspace);
-# put it on PATH so `wrangler deploy` can re-run worker-build via [build].
+# put it on PATH so `wrangler deploy` can re-run the WASM compile via [build].
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # Pin to the toolchain directly so wrangler's worker-build re-run bypasses
