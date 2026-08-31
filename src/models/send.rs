@@ -261,6 +261,21 @@ impl SendDB {
         })
     }
 
+    /// Write a JSON array of `to_json()` objects without collecting a `Vec<Value>`.
+    /// Byte-identical to `serde_json::to_string` of that vec.
+    pub fn append_json_array(sends: &[Self], out: &mut String) -> Result<(), AppError> {
+        out.push('[');
+        for (idx, send) in sends.iter().enumerate() {
+            if idx > 0 {
+                out.push(',');
+            }
+            let obj = send.to_json();
+            serde_json::to_writer(StringWrite(out), &obj).map_err(|_| AppError::Internal)?;
+        }
+        out.push(']');
+        Ok(())
+    }
+
     pub fn to_access_json(&self, creator_identifier: Option<&str>) -> Value {
         let mut data: Value = serde_json::from_str(&self.data)
             .map(lowercase_first_char_keys)
@@ -277,6 +292,22 @@ impl SendDB {
             "creatorIdentifier": creator_identifier,
             "object": "send-access",
         })
+    }
+}
+
+/// `serde_json::to_writer` target that appends UTF-8 JSON onto a `String`.
+struct StringWrite<'a>(&'a mut String);
+
+impl std::io::Write for StringWrite<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let text = std::str::from_utf8(buf)
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidData, err))?;
+        self.0.push_str(text);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -753,4 +784,93 @@ pub fn uuid_from_access_id(access_id: &str) -> Result<String, AppError> {
 
 fn inaccessible_error() -> AppError {
     AppError::NotFound(SEND_INACCESSIBLE_MSG.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::attachment::display_size;
+    use serde_json::{json, Value};
+
+    fn sample_text_send() -> SendDB {
+        SendDB {
+            id: "01234567-89ab-cdef-0123-456789abcdef".into(),
+            user_id: "user".into(),
+            name: "enc-name".into(),
+            notes: Some("enc-notes".into()),
+            send_type: SendType::Text as i32,
+            data: r#"{"Text":"secret","Hidden":false}"#.into(),
+            akey: "key".into(),
+            password_hash: None,
+            password_salt: None,
+            password_iter: None,
+            max_access_count: Some(5),
+            access_count: 1,
+            created_at: "2026-01-01T00:00:00.000Z".into(),
+            updated_at: "2026-01-02T00:00:00.000Z".into(),
+            expiration_date: None,
+            deletion_date: "2026-02-01T00:00:00.000Z".into(),
+            disabled: 0,
+            hide_email: 1,
+        }
+    }
+
+    fn sample_file_send() -> SendDB {
+        let mut send = sample_text_send();
+        send.id = "fedcba98-7654-3210-fedc-ba9876543210".into();
+        send.send_type = SendType::File as i32;
+        send.notes = None;
+        send.data = r#"{"id":"file-id","Size":2048}"#.into();
+        send.password_hash = Some("stored-hash".into());
+        send.disabled = 1;
+        send.hide_email = 0;
+        send.max_access_count = None;
+        send
+    }
+
+    fn append_array_json(sends: &[SendDB]) -> String {
+        let mut out = String::new();
+        SendDB::append_json_array(sends, &mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn append_json_array_matches_vec_serialize() {
+        let sends = vec![sample_text_send(), sample_file_send()];
+        let expected =
+            serde_json::to_string(&sends.iter().map(SendDB::to_json).collect::<Vec<_>>()).unwrap();
+        assert_eq!(append_array_json(&sends), expected);
+        assert_eq!(append_array_json(&[]), "[]");
+    }
+
+    #[test]
+    fn to_json_lowercases_data_keys_and_sets_auth_flags() {
+        let json = sample_text_send().to_json();
+        assert_eq!(json["object"], "send");
+        assert_eq!(
+            json["accessId"],
+            access_id_from_uuid("01234567-89ab-cdef-0123-456789abcdef")
+        );
+        assert_eq!(json["text"], json!({"text": "secret", "hidden": false}));
+        assert_eq!(json["file"], Value::Null);
+        assert_eq!(json["authType"], SendAuthType::None as i32);
+        assert_eq!(json["disabled"], false);
+        assert_eq!(json["hideEmail"], true);
+        assert_eq!(json["password"], Value::Null);
+    }
+
+    #[test]
+    fn to_json_normalizes_file_size_and_password_auth() {
+        let json = sample_file_send().to_json();
+        assert_eq!(json["text"], Value::Null);
+        assert_eq!(
+            json["file"],
+            json!({"id": "file-id", "size": "2048", "sizeName": display_size(2048)})
+        );
+        assert_eq!(json["authType"], SendAuthType::Password as i32);
+        assert_eq!(json["password"], "stored-hash");
+        assert_eq!(json["disabled"], true);
+        assert_eq!(json["hideEmail"], false);
+        assert_eq!(json["maxAccessCount"], Value::Null);
+    }
 }

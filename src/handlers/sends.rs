@@ -22,6 +22,7 @@ use crate::{
     handlers::attachments::{
         attachments_enabled, delete_storage_objects, is_kv_backend, upload_to_storage,
     },
+    handlers::ciphers::RawJson,
     handlers::{enforce_ip_rate_limit, get_env_usize},
     models::attachment::display_size,
     models::send::{validate_send_dates, SendDB, SendRequestData, SendType, SEND_INACCESSIBLE_MSG},
@@ -245,18 +246,12 @@ async fn resolve_creator_identifier(db: &crate::db::Db, send: &SendDB) -> Option
 // ── GET /api/sends ──────────────────────────────────────────────────
 
 #[worker::send]
-pub async fn list_sends(
-    claims: Claims,
-    State(env): State<Arc<Env>>,
-) -> Result<Json<Value>, AppError> {
+pub async fn list_sends(claims: Claims, State(env): State<Arc<Env>>) -> Result<RawJson, AppError> {
     let db = db::get_db(&env)?;
-    let sends = SendDB::find_by_user(&db, &claims.sub).await?;
-    let list: Vec<Value> = sends.iter().map(SendDB::to_json).collect();
-    Ok(Json(serde_json::json!({
-        "data": list,
-        "object": "list",
-        "continuationToken": null,
-    })))
+    let mut response = String::from("{\"data\":");
+    append_sends_json_array(&mut response, &db, &claims.sub).await?;
+    response.push_str(",\"object\":\"list\",\"continuationToken\":null}");
+    Ok(RawJson(response))
 }
 
 // ── GET /api/sends/{send_id} ────────────────────────────────────────
@@ -965,8 +960,5 @@ pub async fn append_sends_json_array(
     user_id: &str,
 ) -> Result<(), AppError> {
     let sends = SendDB::find_by_user(db, user_id).await?;
-    let list: Vec<Value> = sends.iter().map(SendDB::to_json).collect();
-    let json = serde_json::to_string(&list).map_err(|_| AppError::Internal)?;
-    out.push_str(&json);
-    Ok(())
+    SendDB::append_json_array(&sends, out)
 }

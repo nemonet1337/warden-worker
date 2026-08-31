@@ -37,15 +37,15 @@ pub async fn get_sync_data(
     let user_id = claims.sub;
     let db = db::get_db(&env)?;
 
-    // Fetch profile
+    // Fetch profile first; remaining reads are independent and run concurrently
+    // to overlap D1 round-trips. Keep `first-primary` (via `get_db`) so a
+    // WebSocket-triggered sync after a write cannot observe a stale replica.
     let user: User = db
         .prepare("SELECT * FROM users WHERE id = ?1")
         .bind(&[user_id.clone().into()])?
         .first(None)
         .await?
         .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
-
-    let two_factor_enabled = two_factor_enabled(&db, &user_id).await?;
 
     let has_master_password = !user.master_password_hash.is_empty();
     let equivalent_domains = user.equivalent_domains.clone();
@@ -70,29 +70,54 @@ pub async fn get_sync_data(
         Value::Null
     };
 
-    // Fetch folders
-    let folders_db: Vec<Folder> = db
-        .prepare("SELECT * FROM folders WHERE user_id = ?1")
-        .bind(&[user_id.clone().into()])?
-        .all()
-        .await?
-        .results()?;
+    let include_attachments = attachments::attachments_enabled(env.as_ref());
+    let force_row_query = ciphers_default_row_query(env.as_ref());
+    let cipher_params = [user_id.clone().into()];
+    let folders_user_id = user_id.clone();
+    let mut ciphers_json = String::new();
+    let mut sends_json = String::new();
+
+    let (two_factor_res, folders_res, ciphers_res, sends_res, global_equivalent_domains) = futures_util::join!(
+        two_factor_enabled(&db, &user_id),
+        async {
+            db.prepare("SELECT * FROM folders WHERE user_id = ?1")
+                .bind(&[folders_user_id.into()])?
+                .all()
+                .await?
+                .results::<Folder>()
+        },
+        ciphers::append_cipher_json_array_raw(
+            &mut ciphers_json,
+            &db,
+            include_attachments,
+            "WHERE c.user_id = ?1",
+            &cipher_params,
+            "",
+            force_row_query,
+        ),
+        sends::append_sends_json_array(&mut sends_json, &db, &user_id),
+        async {
+            if query.exclude_domains {
+                None
+            } else {
+                Some(domains::global_equivalent_domains_json(&db, &excluded_globals, false).await)
+            }
+        },
+    );
+
+    let two_factor_enabled = two_factor_res?;
+    let folders_db = folders_res?;
+    ciphers_res?;
+    sends_res?;
 
     let folders: Vec<FolderResponse> = folders_db.into_iter().map(|f| f.into()).collect();
 
-    // Fetch ciphers as raw JSON array string (no parsing in Rust!)
-    let include_attachments = attachments::attachments_enabled(env.as_ref());
-    let force_row_query = ciphers_default_row_query(env.as_ref());
-
-    // Serialize profile and folders (small data, acceptable CPU cost)
     let mut profile = Profile::from_user(user, two_factor_enabled)?;
     // Match vaultwarden semantics: `_status` is `Invited` when no master password is set.
     // We don't implement org invitations, but this helps clients interpret the account state.
     profile.status = if has_master_password { 0 } else { 1 };
     let profile_json = serde_json::to_string(&profile).map_err(|_| AppError::Internal)?;
     let folders_json = serde_json::to_string(&folders).map_err(|_| AppError::Internal)?;
-
-    // Build response JSON via string concatenation (ciphers already raw JSON)
     let user_decryption_json = serde_json::to_string(&json!({
         "masterPasswordUnlock": master_password_unlock
     }))
@@ -124,35 +149,19 @@ pub async fn get_sync_data(
     response.push_str(",\"folders\":");
     response.push_str(&folders_json);
     response.push_str(",\"collections\":[],\"policies\":[],\"ciphers\":");
-    ciphers::append_cipher_json_array_raw(
-        &mut response,
-        &db,
-        include_attachments,
-        "WHERE c.user_id = ?1",
-        &[user_id.clone().into()],
-        "",
-        force_row_query,
-    )
-    .await?;
-
+    response.push_str(&ciphers_json);
     response.push_str(",\"domains\":");
-    if query.exclude_domains {
-        response.push_str("null");
-    } else {
-        // Match vaultwarden sync semantics:
-        // - mark excluded in /api/settings/domains
-        // - filter excluded out of sync payload
-        let global_equivalent_domains =
-            domains::global_equivalent_domains_json(&db, &excluded_globals, false).await;
+    if let Some(global_equivalent_domains) = global_equivalent_domains {
         response.push_str("{\"equivalentDomains\":");
         response.push_str(&equivalent_domains);
         response.push_str(",\"globalEquivalentDomains\":");
         response.push_str(&global_equivalent_domains);
         response.push_str(",\"object\":\"domains\"}");
+    } else {
+        response.push_str("null");
     }
-
     response.push_str(",\"sends\":");
-    sends::append_sends_json_array(&mut response, &db, &user_id).await?;
+    response.push_str(&sends_json);
     response.push_str(",\"userDecryption\":");
     response.push_str(&user_decryption_json);
     response.push_str(",\"object\":\"sync\"}");

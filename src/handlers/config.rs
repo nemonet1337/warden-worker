@@ -60,6 +60,7 @@ pub async fn config(
           "api": format!("{domain}/api"),
           "identity": format!("{domain}/identity"),
           "notifications": format!("{domain}/notifications"),
+          "icons": format!("{domain}/icons"),
           "sso": format!(""),
           "cloudRegion": null,
         },

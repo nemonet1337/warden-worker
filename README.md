@@ -16,6 +16,7 @@ Warden aims to solve this problem by leveraging the Cloudflare Workers ecosystem
 
 * **Core Vault Functionality:** Create, read, update, and delete ciphers and folders.
 * **File Attachments:** Optional Cloudflare KV or R2 storage for attachments.
+* **Website Icons:** Login favicons are fetched on demand and cached in R2 (or KV).
 * **Bitwarden Send:** Share encrypted text or files via a link.
 * **Device Management:** View and revoke active sessions.
 * **Live Sync & Push Notifications:** Real-time vault updates via WebSocket and mobile push.

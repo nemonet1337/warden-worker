@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use axum::http::HeaderValue;
 use axum::{extract::DefaultBodyLimit, Extension};
 use tower_http::cors::{Any, CorsLayer};
@@ -23,42 +21,27 @@ mod router;
 #[derive(Clone)]
 pub struct BaseUrl(pub String);
 
-#[event(fetch)]
-pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<web_sys::Response> {
-    console_error_panic_hook::set_once();
-    let _ = console_log::init_with_level(crate::handlers::log_level(&env));
+const BODY_LIMIT: usize = 5 * 1024 * 1024;
 
-    let url = req.url()?;
-    let method = req.method();
-    let path = url.path().to_string();
-
-    if handlers::streaming::is_streaming_route(&method, &path) {
-        return Ok(handlers::streaming::handle(req, &env, &method, &path, &url)
-            .await
-            .into());
-    }
-
-    let http_req: HttpRequest = req.try_into()?;
-
-    let base_url = env
-        .var("BASE_URL")
+fn resolve_base_url(env: &Env, http_req: &HttpRequest) -> String {
+    env.var("BASE_URL")
         .ok()
         .map(|v| v.to_string().trim_end_matches('/').to_string())
         .unwrap_or_else(|| {
-            let uri = http_req.uri().clone();
+            let uri = http_req.uri();
             format!(
                 "{}://{}",
                 uri.scheme_str().unwrap_or("https"),
                 uri.authority().map(|a| a.as_str()).unwrap_or("localhost")
             )
-        });
+        })
+}
 
-    let env = Arc::new(env);
-
-    // CORS: restrict to configured origins when CORS_ALLOW_ORIGINS is set (comma-separated).
-    // Falls back to allowing any origin only when the variable is unset, preserving prior
-    // permissive behavior. Use `Authorization` (Bearer) so cookie-based CSRF is not a vector.
-    let cors = match env.var("CORS_ALLOW_ORIGINS").ok().map(|v| v.to_string()) {
+/// CORS: restrict to configured origins when CORS_ALLOW_ORIGINS is set (comma-separated).
+/// Falls back to allowing any origin only when the variable is unset, preserving prior
+/// permissive behavior. Use `Authorization` (Bearer) so cookie-based CSRF is not a vector.
+fn cors_layer(env: &Env) -> CorsLayer {
+    match env.var("CORS_ALLOW_ORIGINS").ok().map(|v| v.to_string()) {
         Some(value) if !value.trim().is_empty() => {
             let origins: Vec<_> = value
                 .split(',')
@@ -85,15 +68,36 @@ pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<web_sys::Resp
             .allow_methods(Any)
             .allow_headers(Any)
             .allow_origin(Any),
-    };
+    }
+}
 
-    const BODY_LIMIT: usize = 5 * 1024 * 1024;
-
-    let mut app = router::api_router((*env).clone())
+/// Shared Axum stack for the main Worker and HeavyDo (cached route table + per-request layers).
+pub(crate) fn build_http_app(env: Env, http_req: &HttpRequest) -> axum::Router {
+    let base_url = resolve_base_url(&env, http_req);
+    let cors = cors_layer(&env);
+    router::router_with_state(env)
         .layer(Extension(BaseUrl(base_url)))
         .layer(cors)
-        .layer(DefaultBodyLimit::max(BODY_LIMIT));
+        .layer(DefaultBodyLimit::max(BODY_LIMIT))
+}
 
+#[event(fetch)]
+pub async fn main(req: Request, env: Env, _ctx: Context) -> Result<web_sys::Response> {
+    console_error_panic_hook::set_once();
+    let _ = console_log::init_with_level(crate::handlers::log_level(&env));
+
+    let url = req.url()?;
+    let method = req.method();
+    let path = url.path().to_string();
+
+    if handlers::streaming::is_streaming_route(&method, &path) {
+        return Ok(handlers::streaming::handle(req, &env, &method, &path, &url)
+            .await
+            .into());
+    }
+
+    let http_req: HttpRequest = req.try_into()?;
+    let mut app = build_http_app(env, &http_req);
     let resp = app.call(http_req).await?;
     worker::response_to_wasm(resp)
 }

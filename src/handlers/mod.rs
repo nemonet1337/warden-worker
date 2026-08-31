@@ -35,6 +35,7 @@ pub mod devices;
 pub mod domains;
 pub mod emergency_access;
 pub mod folders;
+pub mod icons;
 pub mod identity;
 pub mod import;
 pub mod meta;

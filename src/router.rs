@@ -2,17 +2,21 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use std::cell::OnceCell;
 use std::sync::Arc;
 use worker::Env;
 
 use crate::handlers::{
     accounts, attachments, auth_requests, ciphers, config, devices, domains, emergency_access,
-    folders, identity, import, meta, sends, sync, twofactor, webauth,
+    folders, icons, identity, import, meta, sends, sync, twofactor, webauth,
 };
 
-pub fn api_router(env: Env) -> Router {
-    let app_state = Arc::new(env);
+thread_local! {
+    static API_ROUTER: OnceCell<Router<Arc<Env>>> = const { OnceCell::new() };
+}
 
+/// Stateless route table. Cloned per request and combined with `Env` via `with_state`.
+pub fn api_router() -> Router<Arc<Env>> {
     Router::new()
         // Identity/Auth routes
         .route("/identity/accounts/prelogin", post(accounts::prelogin))
@@ -196,6 +200,8 @@ pub fn api_router(env: Env) -> Router {
             post(sends::access_file_send),
         )
         .route("/api/config", get(config::config))
+        // Website icons (Bitwarden clients request `{iconsUrl}/{domain}/icon.png`)
+        .route("/icons/{domain}/icon.png", get(icons::get_icon))
         // Meta endpoints (mirrors a subset of vaultwarden core/mod.rs)
         .route("/api/alive", get(meta::alive))
         .route("/api/now", get(meta::now))
@@ -266,5 +272,17 @@ pub fn api_router(env: Env) -> Router {
             put(twofactor::disable_twofactor_put),
         )
         .route("/api/two-factor/get-recover", post(twofactor::get_recover))
-        .with_state(app_state)
+}
+
+/// Clone the cached route table and attach this request's `Env`.
+///
+/// The route table is built once per isolate (WASM is single-threaded, so a
+/// `thread_local` `OnceCell` is enough). Layers that depend on the request
+/// (CORS, body limit, `BaseUrl`) are applied by the caller.
+pub fn router_with_state(env: Env) -> Router {
+    API_ROUTER.with(|cell| {
+        cell.get_or_init(api_router)
+            .clone()
+            .with_state(Arc::new(env))
+    })
 }

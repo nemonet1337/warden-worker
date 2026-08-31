@@ -74,7 +74,7 @@ cargo install --locked -q worker-build --version 0.8.5
 worker-build --release --locked
 echo "Rust/WASM build complete."
 
-TAG="${BW_WEB_VERSION:-v2026.6.4}"
+TAG="${BW_WEB_VERSION:-v2026.7.0}"
 echo "Downloading frontend: $TAG"
 wget --tries=5 --waitretry=5 --retry-connrefused -nv \
   "https://github.com/dani-garcia/bw_web_builds/releases/download/${TAG}/bw_web_${TAG}.tar.gz"
@@ -103,14 +103,20 @@ namespace_id = "1003"
 # Allow 15 password attempts per minute per IP for public Send access.
 simple = { limit = 15, period = 60 }
 
+[[ratelimits]]
+name = "ICON_RATE_LIMITER"
+namespace_id = "1005"
+# Cache misses only; first vault load can request many unique domains.
+simple = { limit = 120, period = 60 }
+
 # Static assets configuration for serving frontend
 # Frontend files (bw_web_builds) are expected under ./public/web-vault before deployment
 [assets]
 directory = "./public/web-vault"
 not_found_handling = "404-page"
 html_handling = "auto-trailing-slash"
-# Only invoke Worker for API and Identity routes, serve static files directly for other routes
-run_worker_first = ["/api/*", "/identity/*", "/notifications/*"]
+# Only invoke Worker for API, Identity, notifications, and icon routes; serve static files for the rest
+run_worker_first = ["/api/*", "/identity/*", "/notifications/*", "/icons/*"]
 
 [vars]
 # Set to "false" to show the 'Create account' button in the frontend.
@@ -172,9 +178,10 @@ database_name = "vault-warden"
 database_id = "00a0581b-0f4d-4bca-a3a3-08ec8aadb83a"
 migrations_dir = "migrations"
 
-# R2 bucket for file attachments (optional, requires credit card)
+# R2 bucket for file attachments and website icon cache (optional, requires credit card)
 # R2 has priority: if R2 is configured, KV is ignored.
 # R2 supports larger files and streaming uploads.
+# Website icons are stored under the `icons/` prefix.
 [[r2_buckets]]
 binding = "ATTACHMENTS_BUCKET"
 bucket_name = "vault-warden"
@@ -213,6 +220,11 @@ simple = { limit = 5, period = 60 }
 name = "SEND_ACCESS_RATE_LIMITER"
 namespace_id = "1004"
 simple = { limit = 10, period = 60 }
+
+[[env.dev.ratelimits]]
+name = "ICON_RATE_LIMITER"
+namespace_id = "1006"
+simple = { limit = 120, period = 60 }
 
 # No dev D1 database exists yet in this account. These placeholders are not substituted
 # (env var substitution at build time was removed - see the [build] comment above), so
