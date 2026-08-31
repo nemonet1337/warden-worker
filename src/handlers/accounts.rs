@@ -1,4 +1,8 @@
-use axum::{extract::State, http::HeaderMap, Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    Json,
+};
 use glob_match::glob_match;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -7,7 +11,9 @@ use worker::{D1PreparedStatement, Env};
 
 use crate::d1_query;
 
-use super::{get_batch_size, server_password_iterations, two_factor_enabled};
+use super::{
+    enforce_ip_rate_limit, get_batch_size, server_password_iterations, two_factor_enabled,
+};
 use crate::{
     auth::Claims,
     crypto::{generate_salt, hash_password_for_storage},
@@ -20,8 +26,8 @@ use crate::{
         sync::Profile,
         user::{
             AvatarData, ChangeKdfRequest, ChangePasswordRequest, MasterPasswordUnlockData,
-            PasswordHintRequest, PasswordOrOtpData, PreloginResponse, ProfileData, RegisterRequest,
-            RotateKeyRequest, User,
+            PasswordHintRequest, PasswordOrOtpData, PreloginKdfSettings, PreloginResponse,
+            ProfileData, RegisterRequest, RotateKeyRequest, User,
         },
     },
     notifications::{self, UpdateType},
@@ -155,21 +161,14 @@ pub async fn prelogin(
         .as_str()
         .ok_or_else(|| AppError::BadRequest("Missing email".to_string()))?;
 
-    // Check rate limit using IP address as key to prevent email enumeration attacks
-    if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
-        let ip = headers
-            .get("cf-connecting-ip")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown");
-        let rate_limit_key = format!("prelogin:{}", ip);
-        if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
-            if !outcome.success {
-                return Err(AppError::TooManyRequests(
-                    "Too many requests. Please try again later.".to_string(),
-                ));
-            }
-        }
-    }
+    enforce_ip_rate_limit(
+        &env,
+        &headers,
+        "LOGIN_RATE_LIMITER",
+        "prelogin",
+        "Too many requests. Please try again later.",
+    )
+    .await?;
 
     let db = db::get_db(&env)?;
 
@@ -206,6 +205,13 @@ pub async fn prelogin(
         kdf_iterations: kdf_iterations.unwrap_or(DEFAULT_PBKDF2_ITERATIONS),
         kdf_memory,
         kdf_parallelism,
+        kdf_settings: PreloginKdfSettings {
+            iterations: kdf_iterations.unwrap_or(DEFAULT_PBKDF2_ITERATIONS),
+            kdf_type: kdf_type.unwrap_or(KDF_TYPE_PBKDF2),
+            memory: kdf_memory,
+            parallelism: kdf_parallelism,
+        },
+        salt: None,
     }))
 }
 
@@ -215,20 +221,20 @@ pub async fn register(
     headers: HeaderMap,
     Json(payload): Json<RegisterRequest>,
 ) -> Result<Json<Value>, AppError> {
-    // Check rate limit using IP address as key to prevent mass registration and email enumeration
-    if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
-        let ip = headers
-            .get("cf-connecting-ip")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown");
-        let rate_limit_key = format!("register:{}", ip);
-        if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
-            if !outcome.success {
-                return Err(AppError::TooManyRequests(
-                    "Too many requests. Please try again later.".to_string(),
-                ));
-            }
-        }
+    enforce_ip_rate_limit(
+        &env,
+        &headers,
+        "LOGIN_RATE_LIMITER",
+        "register",
+        "Too many requests. Please try again later.",
+    )
+    .await?;
+
+    if !payload.has_valid_compat_format() {
+        return Err(AppError::api_json(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            json!({ "error": "Unexpected RegisterData format" }),
+        ));
     }
 
     let allowed_emails = env
@@ -245,18 +251,21 @@ pub async fn register(
         return Err(AppError::Unauthorized("Not allowed to signup".to_string()));
     }
 
-    ensure_supported_kdf(
-        payload.kdf,
-        payload.kdf_iterations,
-        payload.kdf_memory,
-        payload.kdf_parallelism,
-    )?;
+    let kdf = payload.kdf();
+    let kdf_type = kdf.kdf;
+    let kdf_iterations = kdf.kdf_iterations;
+    let kdf_memory = kdf.kdf_memory;
+    let kdf_parallelism = kdf.kdf_parallelism;
+    let master_password_hash = payload.master_password_hash().to_owned();
+    let user_symmetric_key = payload.user_symmetric_key().to_owned();
+
+    ensure_supported_kdf(kdf_type, kdf_iterations, kdf_memory, kdf_parallelism)?;
 
     // Generate salt and hash the password with server-side PBKDF2
     let password_salt = generate_salt()?;
     let password_iterations = server_password_iterations(&env) as i32;
     let hashed_password = hash_password_for_storage(
-        &payload.master_password_hash,
+        &master_password_hash,
         &password_salt,
         password_iterations as u32,
     )
@@ -266,8 +275,8 @@ pub async fn register(
     let now = db::now_string();
 
     // Only store kdf_memory and kdf_parallelism for Argon2id, clear for PBKDF2
-    let (kdf_memory, kdf_parallelism) = if payload.kdf == KDF_TYPE_ARGON2ID {
-        (payload.kdf_memory, payload.kdf_parallelism)
+    let (kdf_memory, kdf_parallelism) = if kdf_type == KDF_TYPE_ARGON2ID {
+        (kdf_memory, kdf_parallelism)
     } else {
         (None, None)
     };
@@ -282,11 +291,11 @@ pub async fn register(
         master_password_hint: payload.master_password_hint,
         password_salt: Some(password_salt),
         password_iterations,
-        key: payload.user_symmetric_key,
+        key: user_symmetric_key,
         private_key: payload.user_asymmetric_keys.encrypted_private_key,
         public_key: payload.user_asymmetric_keys.public_key,
-        kdf_type: payload.kdf,
-        kdf_iterations: payload.kdf_iterations,
+        kdf_type,
+        kdf_iterations,
         kdf_memory,
         kdf_parallelism,
         security_stamp: Uuid::new_v4().to_string(),
@@ -348,21 +357,14 @@ pub async fn password_hint(
     headers: HeaderMap,
     Json(payload): Json<PasswordHintRequest>,
 ) -> Result<Json<Value>, AppError> {
-    // Basic rate limit by IP to slow down bulk email enumeration attempts.
-    if let Ok(rate_limiter) = env.rate_limiter("LOGIN_RATE_LIMITER") {
-        let ip = headers
-            .get("cf-connecting-ip")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown");
-        let rate_limit_key = format!("password-hint:{}", ip);
-        if let Ok(outcome) = rate_limiter.limit(rate_limit_key).await {
-            if !outcome.success {
-                return Err(AppError::TooManyRequests(
-                    "Too many requests. Please try again later.".to_string(),
-                ));
-            }
-        }
-    }
+    enforce_ip_rate_limit(
+        &env,
+        &headers,
+        "LOGIN_RATE_LIMITER",
+        "password-hint",
+        "Too many requests. Please try again later.",
+    )
+    .await?;
 
     const NO_HINT: &str = "Sorry, you have no password hint...";
 
@@ -1004,10 +1006,7 @@ pub async fn post_kdf(
     let user = find_user_by_id(&db, user_id).await?;
 
     // Verify the current master password
-    let provided_hash = payload
-        .master_password_hash
-        .ok_or_else(|| AppError::BadRequest("Missing master password hash".to_string()))?;
-    verify_user_password(&user, &provided_hash).await?;
+    verify_user_password(&user, &payload.master_password_hash).await?;
 
     let auth_data = &payload.authentication_data;
     let unlock_data = &payload.unlock_data;

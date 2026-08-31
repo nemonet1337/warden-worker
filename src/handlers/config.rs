@@ -51,6 +51,9 @@ pub async fn config(
         },
         "settings": {
             "disableUserRegistration": disable_user_registration,
+            // When enabled, this setting signals to clients that onboarding interstitials
+            // (post-login welcome dialogs, extension install prompts, setup extension redirects, and premium upsell modals) should be suppressed
+            "suppressOnboardingInterstitials": false,
         },
         "environment": {
           "vault": domain,
@@ -71,6 +74,9 @@ pub async fn config(
             "cxp-import-mobile": true,
             "cxp-export-mobile": true,
         },
+        // Not supported right now; clients use this to detect servers that require
+        // additional work to establish a connection.
+        "communication": null,
         "object": "config",
     }))
 }
