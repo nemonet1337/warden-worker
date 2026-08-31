@@ -15,6 +15,15 @@ bw_web_builds/
 # Generated seed SQL (global equivalent domains)
 sql/global_domains_seed.sql
 
-# Coding assistant
-.claude/
+# Coding assistant / agent local state
+# Share: .devcontainer/, .grok/config.toml, .claude/settings.json, .claude/rules/
+.claude/settings.local.json
+.mcp-auth/
+.headroom/
 .kilo/
+
+# Secrets / local credentials (do not commit)
+.env.*
+!.env.example
+.dev.vars
+
