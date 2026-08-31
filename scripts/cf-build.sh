@@ -54,9 +54,9 @@ if [ -z "${TOOLCHAIN}" ]; then
   exit 1
 fi
 # Pin to this toolchain explicitly so rustup uses it directly and IGNORES
-# rust-toolchain.toml. That file lists `components = ["rustfmt", "clippy"]`,
-# which rustup would otherwise lazily download on the first in-repo cargo
-# command -- slow (clippy is large) and unnecessary for a release build.
+# rust-toolchain.toml. That file lists rustfmt/clippy/rust-analyzer/rust-src
+# for local/CI DX, which rustup would otherwise lazily download on the first
+# in-repo cargo command -- slow and unnecessary for a release build.
 # We install the wasm32 target explicitly below, so nothing is lost.
 export RUSTUP_TOOLCHAIN="${TOOLCHAIN}"
 echo "Installing Rust ${TOOLCHAIN} + wasm32-unknown-unknown"

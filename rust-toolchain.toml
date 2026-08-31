@@ -1,9 +1,8 @@
 [toolchain]
-# Pin the toolchain to keep builds reproducible across machines/CI.
-# Update this intentionally (and together with Cargo.lock) when you want to upgrade.
-channel = "1.91.1"
+# Pin for reproducible builds. Bump this intentionally (and with Cargo.lock) when upgrading.
+# 1.91.1 is too old for current rust-analyzer VS Code extensions; pin a current stable
+# and include the rust-analyzer component so the IDE uses a matching language server.
+channel = "1.98.0"
 profile = "minimal"
-components = ["rustfmt", "clippy", "rust-analyzer"]
+components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]
 targets = ["wasm32-unknown-unknown"]
-
-

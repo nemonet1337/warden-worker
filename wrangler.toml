@@ -58,6 +58,17 @@ if ! command -v rustup >/dev/null 2>&1; then
 fi
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# rust-toolchain.toml lists rustfmt/clippy/rust-analyzer/rust-src for local DX.
+# Pin RUSTUP_TOOLCHAIN so rustup does not download those extra components here.
+TOOLCHAIN=$(sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml | head -n 1)
+if [ -z "$TOOLCHAIN" ]; then
+  echo "ERROR: could not read [toolchain].channel from rust-toolchain.toml" >&2
+  exit 1
+fi
+export RUSTUP_TOOLCHAIN="$TOOLCHAIN"
+echo "Installing Rust $TOOLCHAIN + wasm32-unknown-unknown"
+rustup toolchain install "$TOOLCHAIN" --profile minimal --target wasm32-unknown-unknown
+
 echo "Building Rust/WASM backend..."
 cargo install --locked -q worker-build --version 0.8.5
 worker-build --release --locked
