@@ -27,3 +27,5 @@ sql/global_domains_seed.sql
 !.env.example
 .dev.vars
 
+# Cargo
+Cargo.lock
