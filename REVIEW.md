@@ -15,6 +15,6 @@
 - Do not flag `rustfmt` or `clippy --target wasm32-unknown-unknown` issues that tooling already enforces.
 
 ## Verification expectations
-- D1 changes need a file in `migrations/` and a check against `sql/schema.sql`.
+- D1 changes need a file in `migrations/`.
 - Call out new env vars, secrets, and R2/DO/ratelimit bindings in `wrangler.toml`.
 - Auth, crypto, and isolation changes should be reviewed against the observable Bitwarden-client result, even when unit tests are still sparse.

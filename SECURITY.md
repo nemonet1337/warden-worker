@@ -30,7 +30,7 @@ Security fixes are provided on a best-effort basis for the latest release and th
 - Backend implementation in `src/` (auth, crypto, handlers, database access).
 - Worker entrypoint and edge concerns in `src/entry.js` (routing, attachment streaming, Durable Objects offload).
 - Wrangler configuration in `wrangler.toml` (bindings, rate limiting, routes).
-- Database schema and migrations (`sql/`, `migrations/`).
+- Database schema and migrations (`migrations/`).
 - Deployment tooling and scripts (`docs/`, `scripts/`, GitHub Actions workflows).
 - UI overrides shipped by this repo (e.g., `public/css/`).
 

@@ -1,6 +1,8 @@
 name = "warden-worker"
 main = "src/entry.js"
-compatibility_date = "2026-08-04"
+# Keep current: 2026-10-01+ enables DO pending-I/O keep-alive (NotifyDo/HeavyDo).
+# If wrangler rejects it as a future date, fall back to the newest valid date.
+compatibility_date = "2026-10-09"
 keep_vars = true
 workers_dev = false
 preview_urls = false
@@ -16,7 +18,7 @@ mode = "smart"
 
 [durable_objects]
 bindings = [
-  # Offload CPU-heavy endpoints to Durable Objects 
+  # Offload CPU-heavy endpoints to Durable Objects
   # (100,000 requests, 13,000 GB-s duration / day in free plan),
   # while keeping the main Worker fast for the rest.
   #
@@ -133,7 +135,7 @@ DISABLE_USER_REGISTRATION = "true"
 
 # Workers Logs + Traces (dashboard: Worker → Observability).
 # Automatic spans cover fetch, D1, R2, Durable Objects, and handlers — no SDK.
-# 100% sampling is appropriate for a personal vault; lower head_sampling_rate if volume grows.
+# Logs stay at 100%; traces are sampled at 10% (cost/latency) — raise when debugging.
 # Redeploy is required for this to take effect.
 # Docs: https://developers.cloudflare.com/workers/observability/logs/workers-logs/
 #       https://developers.cloudflare.com/workers/observability/traces/
@@ -148,7 +150,7 @@ persist = true
 
 [observability.traces]
 enabled = true
-head_sampling_rate = 1
+head_sampling_rate = 0.1
 persist = true
 
 # Cron triggers for scheduled tasks
@@ -156,6 +158,9 @@ persist = true
 [triggers]
 crons = ["0 3 * * *"]
 
+# Schema migrations live in migrations/ and are applied with
+# `wrangler d1 migrations apply vault1 --remote` (see scripts/cf-deploy.sh).
+# Test schema changes locally with `wrangler d1 migrations apply vault1 --local`.
 [[d1_databases]]
 binding = "vault1"
 database_name = "vault-warden"
@@ -176,71 +181,3 @@ bucket_name = "vault-warden"
 [[kv_namespaces]]
 binding = "ATTACHMENTS_KV"
 id = "1452edf4aeed49abb5eed78efe197a97"
-
-[env.dev]
-name = "warden-worker-dev"
-workers_dev = false
-preview_urls = false
-
-[env.dev.vars]
-
-[env.dev.durable_objects]
-bindings = [
-  { name = "HEAVY_DO", class_name = "HeavyDo" },
-  { name = "NOTIFY_DO", class_name = "NotifyDo" }
-]
-
-# Dev environment also needs cron triggers
-[env.dev.triggers]
-crons = ["0 3 * * *"]
-
-# Rate limiting for dev environment (same settings as production)
-[[env.dev.ratelimits]]
-name = "LOGIN_RATE_LIMITER"
-namespace_id = "1002"
-simple = { limit = 5, period = 60 }
-
-[[env.dev.ratelimits]]
-name = "SEND_ACCESS_RATE_LIMITER"
-namespace_id = "1004"
-simple = { limit = 10, period = 60 }
-
-[[env.dev.ratelimits]]
-name = "ICON_RATE_LIMITER"
-namespace_id = "1006"
-simple = { limit = 120, period = 60 }
-
-# No dev D1 database exists yet in this account. Wrangler does not expand ${VAR} in
-# this file, so `wrangler deploy --env dev` will fail until you create a dev D1
-# database and replace database_name/database_id below with its real values.
-[[env.dev.d1_databases]]
-binding = "vault1"
-database_name = "${D1_DATABASE_NAME_DEV}"
-database_id = "${D1_DATABASE_ID_DEV}"
-migrations_dir = "migrations"
-
-# R2 bucket for file attachments in dev environment (optional, requires credit card)
-# [[env.dev.r2_buckets]]
-# binding = "ATTACHMENTS_BUCKET"
-# bucket_name = "warden-attachments-dev"
-
-# KV namespace for file attachments in dev environment (optional, no credit card required)
-# No separate dev KV namespace exists yet, so this shares the production one.
-[[env.dev.kv_namespaces]]
-binding = "ATTACHMENTS_KV"
-id = "1452edf4aeed49abb5eed78efe197a97"
-
-# logs + traces
-[env.dev.observability]
-enabled = true
-
-[env.dev.observability.logs]
-enabled = true
-head_sampling_rate = 1
-invocation_logs = true
-persist = true
-
-[env.dev.observability.traces]
-enabled = true
-persist = true
-head_sampling_rate = 1

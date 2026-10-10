@@ -14,9 +14,6 @@
 /vaultwarden/
 /bw_web_builds/
 
-# Generated seed SQL (see scripts/generate-global-domains-seed.py)
-/sql/global_domains_seed.sql
-
 # Secrets / local credentials
 .env
 .env.*
@@ -29,7 +26,7 @@ Thumbs.db
 Desktop.ini
 
 # Agent / MCP local state
-# Committed on purpose: .claude/settings.json, .claude/rules/, .grok/config.toml
+# Committed on purpose: .claude/settings.json, .claude/rules/, .grok/config.toml, .mcp.json, .vscode/mcp.json, .github/copilot/settings.json
 .claude/settings.local.json
 .grok/*
 !.grok/config.toml

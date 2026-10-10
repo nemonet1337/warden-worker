@@ -1,5 +1,7 @@
 # Warden: A Bitwarden-compatible server for Cloudflare Workers
 
+**English** | [日本語](README.ja.md)
+
 [![Powered by Cloudflare](https://img.shields.io/badge/Powered%20by-Cloudflare-F38020?logo=cloudflare&logoColor=white)](https://www.cloudflare.com/)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Deploy to Cloudflare Workers](https://img.shields.io/badge/Deploy%20to-Cloudflare%20Workers-orange?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
@@ -87,13 +89,13 @@ It's highly recommended to deploy your own instance since the demo can hit the r
 
 ## Frontend (Web Vault)
 
-The frontend is bundled with the Worker using [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/). Cloudflare's build downloads a **pinned** [bw_web_builds](https://github.com/dani-garcia/bw_web_builds) (Vaultwarden web vault) release (default: `v2026.6.4`) and deploys it together with the backend. Pin via the `BW_WEB_VERSION` build variable, or set it to `latest` to follow upstream.
+The frontend is bundled with the Worker using [Cloudflare Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/). Cloudflare's build downloads a **pinned** [bw_web_builds](https://github.com/dani-garcia/bw_web_builds) (Vaultwarden web vault) release (default: `v2026.7.0`) and deploys it together with the backend. Pin via the `BW_WEB_VERSION` build variable, or set it to `latest` to follow upstream.
 
 **How it works:**
 - Static files (HTML, CSS, JS) are served directly by Cloudflare's edge network.
 - API requests (`/api/*`, `/identity/*`) are routed to the Rust Worker.
 - No separate Pages deployment or domain configuration needed.
-- The repository is linked to Cloudflare, which builds and deploys automatically on push. `scripts/cf-build.sh` (the Workers Builds **Build** command) bootstraps a Rust toolchain via rustup, compiles the WASM backend, and downloads the frontend (`bw_web_builds`; pin via the `BW_WEB_VERSION` build variable; defaults to `v2026.6.4`).
+- The repository is linked to Cloudflare, which builds and deploys automatically on push. `scripts/cf-build.sh` (the Workers Builds **Build** command) bootstraps a Rust toolchain via rustup, compiles the WASM backend, and downloads the frontend (`bw_web_builds`; pin via the `BW_WEB_VERSION` build variable; defaults to `v2026.7.0`).
 
 **UI overrides (optional):**
 - This project ships a small set of "lightweight self-host" UI tweaks in `public/css/`.

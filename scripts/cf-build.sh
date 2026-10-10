@@ -32,7 +32,7 @@ set -euo pipefail
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 WORKER_BUILD_VERSION="${WORKER_BUILD_VERSION:-0.8.5}"
-BW_WEB_VERSION="${BW_WEB_VERSION:-v2026.6.4}"
+BW_WEB_VERSION="${BW_WEB_VERSION:-v2026.7.0}"
 
 step() { printf '\n\033[1m=== %s ===\033[0m\n' "$1"; }
 
@@ -89,6 +89,8 @@ find public/web-vault -type f -name '*.map' -delete
 # Apply the lightweight UI override.
 mkdir -p public/web-vault/css/
 cp public/css/vaultwarden.css public/web-vault/css/
+# Apply security headers for static assets (parsed by Workers Assets, not served).
+cp public/_headers public/web-vault/_headers
 echo "Frontend ready in public/web-vault"
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,15 @@
+# Static security headers for Workers Static Assets (Cloudflare `_headers`).
+#
+# Parsed by Workers Assets and applied to static asset responses only.
+# Worker-generated responses (/api/*, /identity/*, ...) do NOT get these
+# headers, per Cloudflare Docs (Custom Headers section).
+#
+# Note: a few Worker responses set X-Content-Type-Options: nosniff
+# individually (src/handlers/icons.rs, src/handlers/streaming.rs).
+#
+# Do not serve this file itself.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  X-Robots-Tag: noindex

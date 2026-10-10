@@ -5,7 +5,7 @@ Centralize your D1 operational playbooks here: backup automation, restore flows,
 ## GitHub Actions Backups
 
 > [!NOTE]
-> To use this backup feature, you must fork this repository and configure the required Cloudflare secrets as described in the [CI/CD deployment](deployment.md#cicd-deployment-with-github-actions) section in advance: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `D1_DATABASE_ID` (and `D1_DATABASE_ID_DEV` if you want to backup `dev`).
+> To use this backup feature, you must fork this repository and configure the required Cloudflare secrets as described in the [CI/CD deployment](deployment.md#cicd-deployment-with-github-actions) section in advance: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `D1_DATABASE_ID`.
 
 This project includes a GitHub Action workflow that automatically exports your D1 database and uploads the backup to one or more destinations (S3-compatible storage and/or WebDAV) daily. The backup runs at 04:00 UTC (1 hour after the cleanup task).
 
@@ -53,7 +53,7 @@ Add the following secrets to your GitHub repository (`Settings > Secrets and var
 
 * **Automatic Daily Backups:** Production database is backed up daily at 04:00 UTC
 * **Manual Trigger:** You can manually trigger a backup from the GitHub Actions tab
-* **Environment Selection:** When triggering manually, you can choose to backup either `production` or `dev` database
+* **Environment Selection:** Backups target the production database only (the `dev` environment has been removed)
 * **Compression:** Backups are compressed using gzip to save storage space
 * **Optional Encryption:** If `BACKUP_ENCRYPTION_KEY` is set, backups are encrypted with AES-256-CBC (PBKDF2 key derivation, 100k iterations)
 * **Automatic Cleanup:** Old backups older than 30 days are automatically deleted
@@ -133,7 +133,7 @@ gunzip backup.sql.gz
     wrangler d1 list
     ```
 
-    This will show a table with your databases. Look for the `name` column (e.g., `warden-db` for production or `warden-dev` for dev).
+    This will show a table with your databases. Look for the `name` column (e.g., `warden-db`).
 
     Then restore the backup:
 

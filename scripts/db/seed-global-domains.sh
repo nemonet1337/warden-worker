@@ -7,20 +7,23 @@ Seed Vaultwarden/Bitwarden global equivalent domains into Cloudflare D1.
 
 This:
 1) Downloads (or reads local) global_domains.json
-2) Generates sql/global_domains_seed.sql
+2) Generates a temp seed SQL file
 3) Executes it against a D1 database via wrangler
 
 Usage:
-  ./scripts/seed-global-domains.sh --db <d1_name> [--env <wrangler_env>] [--remote] [--url <raw_json_url>] [--wrangler-version <ver>]
+  ./scripts/db/seed-global-domains.sh --db <d1_name> [--env <wrangler_env>] [--remote] [--url <raw_json_url>] [--wrangler-version <ver>]
 
 Examples:
-  ./scripts/seed-global-domains.sh --db vault1 --remote
-  ./scripts/seed-global-domains.sh --db vault1 --env dev --remote
-  ./scripts/seed-global-domains.sh --db vault1 --remote \
+  ./scripts/db/seed-global-domains.sh --db vault1 --remote
+  ./scripts/db/seed-global-domains.sh --db vault1 --local
+  ./scripts/db/seed-global-domains.sh --db vault1 --remote \
     --url https://raw.githubusercontent.com/dani-garcia/vaultwarden/<tag-or-commit>/src/static/global_domains.json
 
   # Use a pinned Wrangler version via npx (recommended for CI)
-  ./scripts/seed-global-domains.sh --db vault1 --remote --wrangler-version 4.82.1
+  ./scripts/db/seed-global-domains.sh --db vault1 --remote --wrangler-version 4.82.1
+
+  # Keep the generated SQL by setting OUTPUT (or passing --output <file>)
+  OUTPUT=/tmp/seed.sql ./scripts/db/seed-global-domains.sh --db vault1 --local
 EOF
 }
 
@@ -29,7 +32,8 @@ ENV_NAME=""
 REMOTE=0
 URL=""
 INPUT=""
-OUTPUT="sql/global_domains_seed.sql"
+OUTPUT="${OUTPUT:-}"   # empty => generate into a temp file and clean up
+CLEANUP=0
 WRANGLER_VERSION=""
 
 while [[ $# -gt 0 ]]; do
@@ -63,6 +67,11 @@ if [[ -z "$DB_NAME" ]]; then
   exit 2
 fi
 
+if [[ -z "$OUTPUT" ]]; then
+  OUTPUT="$(mktemp -t global_domains_seed.XXXXXX.sql)"
+  CLEANUP=1
+fi
+
 GEN_ARGS=(--output "$OUTPUT")
 if [[ -n "$INPUT" ]]; then
   GEN_ARGS+=(--input "$INPUT")
@@ -70,7 +79,7 @@ elif [[ -n "$URL" ]]; then
   GEN_ARGS+=(--url "$URL")
 fi
 
-python3 scripts/generate-global-domains-seed.py "${GEN_ARGS[@]}"
+python3 "$(dirname -- "$0")/generate-global-domains-seed.py" "${GEN_ARGS[@]}"
 
 WRANGLER_ARGS=(d1 execute "$DB_NAME" --file "$OUTPUT")
 if [[ -n "$ENV_NAME" ]]; then
@@ -88,4 +97,8 @@ elif ! command -v wrangler >/dev/null 2>&1; then
 fi
 
 "${WRANGLER[@]}" "${WRANGLER_ARGS[@]}"
+
+if [[ "${CLEANUP}" -eq 1 ]]; then
+  rm -f "$OUTPUT"
+fi
 

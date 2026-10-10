@@ -63,7 +63,7 @@ This page covers the available deployment paths. Pick the one that fits your wor
 
    ```bash
    # Default pinned version (override by exporting BW_WEB_VERSION)
-   BW_WEB_VERSION="${BW_WEB_VERSION:-v2026.6.4}"
+    BW_WEB_VERSION="${BW_WEB_VERSION:-v2026.7.0}"
    if [ "${BW_WEB_VERSION}" = "latest" ]; then
      BW_WEB_VERSION="$(curl -s https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest | jq -r .tag_name)"
    fi
@@ -81,20 +81,19 @@ This page covers the available deployment paths. Pick the one that fits your wor
 
    ```bash
    mkdir -p public/web-vault/css/ && cp public/css/vaultwarden.css public/web-vault/css/
+   cp public/_headers public/web-vault/_headers
    ```
 
 6. **Set up database and deploy the worker:**
 
    ```bash
-   # Only run once before first deployment
-   wrangler d1 execute vault1 --file sql/schema.sql --remote
-   # For migrations
+   # Migrations also create the initial schema on an empty database
    wrangler d1 migrations apply vault1 --remote
 
    # (Optional) Seed global equivalent domains into D1
    # This downloads Vaultwarden's global_domains.json by default.
-   bash scripts/seed-global-domains.sh --db vault1 --remote
-   
+   bash scripts/db/seed-global-domains.sh --db vault1 --remote
+
    wrangler deploy
    ```
 
@@ -130,7 +129,6 @@ Add the following secrets to your GitHub repository (`Settings > Secrets and var
 | `CLOUDFLARE_API_TOKEN` | yes | Your Cloudflare API token |
 | `CLOUDFLARE_ACCOUNT_ID` | yes | Your Cloudflare account ID |
 | `D1_DATABASE_ID` | yes | Your production D1 database ID |
-| `D1_DATABASE_ID_DEV` | no | Dev D1 database ID (required only if you use the `Deploy Dev` workflow on the `dev` branch) |
 
 #### How to Get Your Cloudflare Account ID
 
@@ -162,7 +160,6 @@ This is useful if you created your D1 database with a custom name other than the
 | Variable | Applies to | Default | Example | Notes |
 |----------|------------|---------|---------|-------|
 | `D1_DATABASE_NAME` | prod (`main/uat/release*`) | `vault1` | `my-warden-db` | Must match the database name you created in Cloudflare |
-| `D1_DATABASE_NAME_DEV` | dev (`dev`) | `vault1-dev` | `my-warden-db-dev` | Must match the dev database name you created in Cloudflare |
 
 #### R2 Bucket Name
 
@@ -171,7 +168,6 @@ To enable R2 attachments, add the bucket name as a GitHub Actions Secret (not a 
 | Secret | Applies to | Description |
 |--------|------------|-------------|
 | `R2_NAME` | prod | Production R2 bucket name (e.g. `warden-attachments`) |
-| `R2_NAME_DEV` | dev | Dev R2 bucket name (e.g. `warden-attachments-dev`) |
 
 When these secrets are present, the workflows automatically append the `ATTACHMENTS_BUCKET` binding to `wrangler.toml`.
 
@@ -181,8 +177,7 @@ You can pin/override the bundled Web Vault (bw_web_builds) version via GitHub Ac
 
 | Variable | Applies to | Default | Example | Notes |
 |----------|------------|---------|---------|-------|
-| `BW_WEB_VERSION` | prod (`main/uat/release*`) | `v2026.6.4` | `v2026.6.4` | Set to `latest` to follow upstream latest release |
-| `BW_WEB_VERSION_DEV` | dev (`dev`) | `v2026.6.4` | `v2026.6.4` | Set to `latest` to follow upstream latest release |
+| `BW_WEB_VERSION` | prod (`main/uat/release*`) | `v2026.7.0` | `v2026.7.0` | Set to `latest` to follow upstream latest release |
 
 #### Global Equivalent Domains
 
@@ -192,9 +187,8 @@ To avoid bundling a large JSON file into the Worker, the dataset can be stored i
 
 | Variable | Applies to | Default | Example | Notes |
 |----------|------------|---------|---------|-------|
-| `SEED_GLOBAL_DOMAINS` | prod + dev | `true` | `false` | Set to `false` to skip seeding (API returns empty list) |
+| `SEED_GLOBAL_DOMAINS` | prod | `true` | `false` | Set to `false` to skip seeding (API returns empty list) |
 | `GLOBAL_DOMAINS_URL` | prod | (empty) | raw GitHub URL | Optional: pin a specific Vaultwarden tag/commit for reproducible deploys |
-| `GLOBAL_DOMAINS_URL_DEV` | dev | (empty) | raw GitHub URL | Same as prod, but for dev workflow |
 
 If you skip seeding, `/api/settings/domains` and `/api/sync` will return `globalEquivalentDomains: []`.
 
@@ -250,7 +244,7 @@ By default, the `*.workers.dev` domain is disabled, since it may throw 1101 erro
 Because this is a Rust→WASM Worker (the Workers Builds image does not ship Rust) and the frontend, database id, and migrations are all resolved at build time, the pipeline is encapsulated in two scripts:
 
 - [`scripts/cf-build.sh`](../scripts/cf-build.sh) (**Build** phase) — installs the Rust toolchain, downloads the Web Vault frontend, substitutes the D1 database id, and compiles the Worker.
-- [`scripts/cf-deploy.sh`](../scripts/cf-deploy.sh) (**Deploy** phase) — bootstraps/migrates D1, optionally seeds global domains, then runs `wrangler deploy`.
+- [`scripts/cf-deploy.sh`](../scripts/cf-deploy.sh) (**Deploy** phase) — applies D1 migrations, optionally seeds global domains, then runs `wrangler deploy`.
 
 **No separate `CLOUDFLARE_API_TOKEN` is needed for the deploy itself.** Workers Builds auto-generates a *build token* and uses it as the credential for the deploy phase. Because the D1 migrations run in that same deploy phase (`cf-deploy.sh`), they reuse that one token — you just grant it D1 access once (step 2 below). (The separate daily backup workflow still relies on the `CLOUDFLARE_API_TOKEN` GitHub secret — see the note above.)
 
@@ -274,13 +268,13 @@ Because this is a Rust→WASM Worker (the Workers Builds image does not ship Rus
    | Name | Required | Description |
    |------|----------|-------------|
    | `D1_DATABASE_ID` | yes | Production D1 database id (substituted into `wrangler.toml`) |
-   | `BW_WEB_VERSION` | no | `bw_web_builds` tag (default `v2026.6.4`); set `latest` to track upstream |
+   | `BW_WEB_VERSION` | no | `bw_web_builds` tag (default `v2026.7.0`); set `latest` to track upstream |
    | `WRANGLER_VERSION` | no | Pinned wrangler (default `4.82.1`) |
    | `WORKER_BUILD_VERSION` | no | Pinned worker-build (default `0.8.5`; match the `worker` dep in `Cargo.toml`) |
    | `R2_NAME` | no | R2 bucket name; enables the `ATTACHMENTS_BUCKET` binding |
    | `SEED_GLOBAL_DOMAINS` | no | `false` to skip seeding global equivalent domains |
    | `GLOBAL_DOMAINS_URL` | no | Pin a specific `global_domains.json` source |
-   | `SKIP_D1` | no | `1` to skip all D1 bootstrap/migrate/seed steps (deploy still runs) |
+   | `SKIP_D1` | no | `1` to skip all D1 migration/seed steps (deploy still runs) |
    | `CLOUDFLARE_ACCOUNT_ID` | no | Set only if wrangler cannot infer the account during migrations |
 
 5. Set the runtime **Worker** secrets (these are *not* build variables — set them under the Worker's **Settings → Variables and Secrets**, not the build config): `ALLOWED_EMAILS`, `JWT_SECRET`, `JWT_REFRESH_SECRET`, plus any optional push settings. See step 7 of [CLI Deployment](#cli-deployment).
@@ -291,7 +285,7 @@ Because this is a Rust→WASM Worker (the Workers Builds image does not ship Rus
 > The first build is slow (it compiles the Rust toolchain dependencies and `worker-build` from scratch). Subsequent builds reuse the build cache and are faster.
 
 > [!NOTE]
-> If you set `SKIP_D1=1` (or skip step 2), the Worker still builds and deploys, but D1 migrations are **not** applied automatically — apply them yourself when the schema changes (`npx wrangler d1 migrations apply vault1 --remote`), or run the GitHub Actions `Build` workflow manually.
+> If you set `SKIP_D1=1` (or skip step 2), the Worker still builds and deploys, but D1 migrations are **not** applied automatically — apply them yourself when the schema changes (`npx wrangler d1 migrations apply vault1 --remote`). The `dev` environment has been removed, so `wrangler deploy` targets production only.
 
 > [!IMPORTANT]
 > The default `Build` workflow deploys on every push to `main`. If you adopt Workers Builds, **disable that workflow** (repository **Actions** tab → select **Build** → **Disable workflow**, or remove the `push:` trigger in `.github/workflows/push-cloudflare.yaml`) so `main` is not deployed twice. Leave the `Backup D1 Database` workflow enabled — it still runs on its own schedule.

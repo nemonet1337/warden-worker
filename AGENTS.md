@@ -16,8 +16,7 @@ Unsupported/"won't implement" features are listed in `README.md`.
     - `NotifyDo` for websocket notifications.
 - `src/entry.js`: Wrangler entrypoint (routing + R2 attachment streaming + optional DO offload).
 - `migrations/`: D1 migrations applied via Wrangler.
-- `sql/`: base schema (`sql/schema.sql`) and optional seed SQL.
-- `scripts/`: helper scripts (apply web-vault overrides, seed equivalent domains).
+- `scripts/`: helper scripts (apply web-vault overrides, seed equivalent domains). Also `scripts/db/` for DB seed scripts.
 - `docs/`: deployment and D1 backup/restore playbooks.
 
 ## Build, Test, and Development Commands
@@ -27,7 +26,7 @@ Prereqs: Rust toolchain from `rust-toolchain.toml`, Node.js, and Wrangler.
 - `cargo test`: run unit tests (currently none).
 - Local dev: `wrangler dev --local --persist-to .wrangler/state`.
 - Apply migrations (remote): `wrangler d1 migrations apply vault1 --remote`.
-- Deploy: `wrangler deploy` (or `wrangler deploy --env dev`).
+- Deploy: `wrangler deploy`.
 
 ## Coding Style & Naming Conventions
 - Rust: keep routing in `src/router.rs` and endpoint logic in `src/handlers/*`.
